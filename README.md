@@ -32,6 +32,6 @@ Hệ thống được chia thành các module độc lập để dễ quản lý
 ---
 
 ## 4. Hướng dẫn & Lưu ý quan trọng
-* **Chuẩn Code PEP-8:** Khuyến khích anh em code tuân thủ chuẩn **PEP-8** của Python (dùng `snake_case` cho tên biến/hàm, comment rõ chức năng, cách dòng chuẩn chỉ). Điều này giúp code sạch, dễ đọc và dễ gộp (merge) mà không bị conflict.
+* **Chuẩn Code [PEP-8](https://codelearn.io/sharing/pep8-chuan-ket-noi-python-phan-1):** Khuyến khích anh em code tuân thủ chuẩn **PEP-8** của Python (dùng `snake_case` cho tên biến/hàm, comment rõ chức năng, cách dòng chuẩn chỉ). Điều này giúp code sạch, dễ đọc và dễ gộp (merge) mà không bị conflict.
 * **Thư viện yêu cầu:** Cài đặt các thư viện lõi bằng lệnh pip: `opencv-python`, `pyzbar`, `tkinter`...
-* **Tài nguyên dự án:** [Link Google Drive: [PRPY238164] - Tiểu luận Python - QR Code](https://drive.google.com/drive/folders/18oSkehrKZfj7nN2bt-9R4SEqQLHEXabb?usp=drive_link)
+* **Tài nguyên dự án:** Link Google Drive: [[PRPY238164] - Tiểu luận Python - QR Code](https://drive.google.com/drive/folders/18oSkehrKZfj7nN2bt-9R4SEqQLHEXabb?usp=drive_link)
