@@ -1,6 +1,6 @@
 # ĐỒ ÁN: ỨNG DỤNG QUÉT VÀ QUẢN LÝ MÃ QR (Desktop App)
 
-## 1. Thành viên nhóm 13 (Họ tên - MSSV)
+## 1. Thành viên (Họ tên - MSSV)
 * **Nguyễn Lê Phúc Thịnh** - 25139047
 * **Nguyễn Truy Phong** - 25139031
 * **Lê Nguyễn Văn Hòa** - 25139013
