@@ -8,10 +8,12 @@ NHIỆM VỤ CỦA FILE UI_MANAGER:
 Lưu ý: Sử dụng hàm .after() của Tkinter để cập nhật frame hình ảnh liên tục 
 mà không làm treo giao diện (Not Responding).
 """
-
 import tkinter as tk
 from tkinter import ttk
 from PIL import Image, ImageTk
+
+# BỔ SUNG DÒNG NÀY ĐỂ KẾT NỐI VỚI BỘ NÃO AI
+from qr_decoder import QRDecoder
 
 class QRCodeApp(tk.Tk):
     def __init__(self):
@@ -134,29 +136,76 @@ class QRCodeApp(tk.Tk):
 class scan_page(tk.Frame):
     def __init__(self, parent):
         super().__init__(parent)
-
         self.bg_image = Image.open("Scan.png")
         self.bg_image = self.bg_image.resize((850, 550))
         self.bg_photo = ImageTk.PhotoImage(self.bg_image)
-
+        
         bg_label = tk.Label(self, image=self.bg_photo)
         bg_label.place(x=0, y=0, relwidth=1, relheight=1)
-
+        
         self.camera_label = tk.Label(self, bg="black")
         self.camera_label.place(relx=0.5, rely=0.386, width=180, height=228, anchor="center")
-
-        # sự kiện click chuột trái
+        
+        # Sự kiện click chuột trái
         self.bind_all("<Button-1>", self.check_click)
+        
+        # BỔ SUNG CÁC BIẾN QUẢN LÝ CAMERA
+        self.decoder = None 
+        self.is_scanning = False 
 
     def check_click(self, event):
-        x, y = event.x, event.y #xác định tọa độ xy
-        x0, y0 = 353, 489 #Tọa độ tâm
-        r = 30 #bán kính 
-
+        x, y = event.x, event.y
+        # Xác định tọa độ xy nút bấm
+        x0, y0 = 353, 489  # Tọa độ tâm
+        r = 30             # Bán kính
         if (x - x0)**2 + (y - y0)**2 <= r**2:
-            self.bat_camera() #Khi click trúng biểu tượng thực hiện def bat_camera
+            self.bat_camera()
+
     def bat_camera(self):
-            print("Đã bật camera!")
+        if not self.is_scanning:
+            print("Đang bật camera và khởi động AI...")
+            # Khởi tạo class từ file qr_decoder.py
+            if self.decoder is None:
+                self.decoder = QRDecoder()
+            
+            self.is_scanning = True
+            # Bắt đầu vòng lặp lấy hình ảnh
+            self.update_frame()
+
+    # THÊM HÀM MỚI: Vòng lặp cập nhật hình ảnh lên UI
+    def update_frame(self):
+        if self.is_scanning:
+            # Lấy ảnh RGB và dữ liệu từ qr_decoder
+            frame_rgb, noi_dung, phan_loai = self.decoder.get_frame_and_data()
+
+            if frame_rgb is not None:
+                # 1. Chuyển ma trận ảnh (numpy array) thành hình ảnh PIL
+                img = Image.fromarray(frame_rgb)
+                
+                # 2. Thay đổi kích thước cho vừa khớp với khung camera_label (180x228)
+                img = img.resize((180, 228), Image.Resampling.LANCZOS)
+                
+                # 3. Chuyển thành định dạng Tkinter có thể đọc được
+                imgtk = ImageTk.PhotoImage(image=img)
+
+                # 4. Gán ảnh vào Label và giữ tham chiếu (RẤT QUAN TRỌNG)
+                self.camera_label.imgtk = imgtk 
+                self.camera_label.configure(image=imgtk)
+
+                # 5. Kiểm tra nếu AI quét được mã thì in ra console (tạm thời)
+                if noi_dung:
+                    print(f"✅ QUÉT THÀNH CÔNG: {noi_dung} | LOẠI: {phan_loai}")
+
+            # Gọi lại hàm update_frame sau 15 mili-giây (~60 FPS)
+            self.after(15, self.update_frame)
+
+    # THÊM HÀM MỚI: Dừng camera an toàn
+    def tat_camera(self):
+        self.is_scanning = False
+        if self.decoder:
+            self.decoder.release_camera()
+            self.decoder = None
+        self.camera_label.configure(image='') # Xóa khung hình cũ
 
 class history_page(tk.Frame):
     def __init__(self, parent):

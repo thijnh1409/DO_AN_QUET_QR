@@ -1,20 +1,10 @@
 """
 NHIỆM VỤ CỦA FILE QR_DECODER:
-2. Sử dụng thư viện pyzbar để tìm kiếm và giải mã (decode) mã QR trong ảnh.
+2. Sử dụng thư viện ...  để tìm kiếm và giải mã (decode) mã QR trong ảnh.
 3. Trích xuất dữ liệu thô (chuỗi văn bản/link) từ mã QR.
 4. (Nâng cao) Xác định tọa độ khung hình chữ nhật của mã QR để vẽ vòng bao 
    lên màn hình, giúp người dùng biết máy đã nhận diện được.
 5. Trả kết quả về cho ui_manager hiển thị và data_manager lưu trữ.
-"""
-
-"""
-Những thư viện cần tham khảo: opencv-python (cv2), pyzbar, ...
-"""
-
-"""
-Module: qr_decoder.py
-Chức năng: Quản lý Camera, nhận diện, giải mã QR và phân loại dữ liệu.
-Người phụ trách: Nguyễn Lê Phúc Thịnh
 """
 
 """
@@ -28,15 +18,20 @@ from typing import Tuple, Optional
 import cv2
 from qreader import QReader
 
-
 class QRDecoder:
     def __init__(self, camera_index: int = 0):
         self.cap = cv2.VideoCapture(camera_index)
         self.scanned_history = {}
         self.cooldown_time = 3.0
         
+        # --- THÔNG SỐ TỐI ƯU HIỆU NĂNG (FRAME SKIPPING) ---
+        self.frame_count = 0
+        self.frame_skip_rate = 5  # Cứ 5 frame thì AI mới quét 1 lần
+        self.last_decoded_texts = []
+        self.last_detections = []
+        # --------------------------------------------------
+        
         print("Đang khởi động AI QReader... (Lần đầu sẽ mất khoảng 5-10 giây để tải mô hình)")
-        # Khởi tạo bộ não AI
         self.qreader = QReader()
         print("Tải AI thành công! Sẵn sàng quét mã nghệ thuật.")
 
@@ -55,45 +50,40 @@ class QRDecoder:
         success, frame = self.cap.read()
         if not success:
             return None, None, None
-
+            
         qr_data_result = None
         qr_type_result = None
-
-        # Đổi sang RGB NGAY TỪ ĐẦU (Vì QReader yêu cầu ảnh RGB để AI nhìn màu cho chuẩn)
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-        # AI BẮT ĐẦU TÌM KIẾM VÀ GIẢI MÁ
-        # return_detections=True để AI trả về cả tọa độ vẽ khung
-        decoded_texts, detections = self.qreader.detect_and_decode(image=frame_rgb, return_detections=True)
-
-        # Nếu AI tìm thấy mã
-        if decoded_texts:
-            for i in range(len(decoded_texts)):
-                qr_data = decoded_texts[i]
-                
-                # Bỏ qua nếu AI tìm thấy khung nhưng mã nát đến mức không thể dịch được chữ nào
-                if qr_data is None: 
+        
+        # --- ÁP DỤNG THUẬT TOÁN QUÉT CÁCH NHỊP ---
+        self.frame_count += 1
+        # Chỉ gọi AI quét mã nếu chia hết cho frame_skip_rate
+        if self.frame_count % self.frame_skip_rate == 0:
+            self.last_decoded_texts, self.last_detections = self.qreader.detect_and_decode(image=frame_rgb, return_detections=True)
+        # -----------------------------------------
+        
+        # Luôn luôn vẽ lại khung xanh dựa trên kết quả lưu từ lần quét gần nhất
+        if self.last_decoded_texts:
+            for i in range(len(self.last_decoded_texts)):
+                qr_data = self.last_decoded_texts[i]
+                if qr_data is None:
                     continue
-                
-                # VẼ KHUNG XANH NHẬN DIỆN
-                bbox = detections[i]['bbox_xyxy'] # Lấy tọa độ
+                    
+                bbox = self.last_detections[i]['bbox_xyxy']
                 x1, y1, x2, y2 = map(int, bbox)
-                cv2.rectangle(frame_rgb, (x1, y1), (x2, y2), (0, 255, 0), 3) # Màu RGB: Xanh lá
+                cv2.rectangle(frame_rgb, (x1, y1), (x2, y2), (0, 255, 0), 3) 
                 
                 display_text = qr_data if len(qr_data) < 25 else qr_data[:25] + "..."
-                cv2.putText(frame_rgb, display_text, (x1, y1 - 10),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2) # Màu RGB: Đỏ
-
-                # THUẬT TOÁN COOLDOWN
+                cv2.putText(frame_rgb, display_text, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
+                
+                # THUẬT TOÁN COOLDOWN (Chỉ lưu lịch sử khi đủ thời gian)
                 current_time = time.time()
                 last_scan_time = self.scanned_history.get(qr_data, 0)
-
                 if (current_time - last_scan_time) > self.cooldown_time:
                     self.scanned_history[qr_data] = current_time
                     qr_data_result = qr_data
                     qr_type_result = self._classify_data(qr_data)
-
-        # Trả thẳng ảnh RGB về cho UI hiển thị
+                    
         return frame_rgb, qr_data_result, qr_type_result
 
     def release_camera(self):
@@ -103,6 +93,7 @@ class QRDecoder:
 # ========================================================
 # PHẦN TEST ĐỘC LẬP
 # ========================================================
+"""
 if __name__ == "__main__":
     may_quet_test = QRDecoder()
     
@@ -124,3 +115,4 @@ if __name__ == "__main__":
 
     may_quet_test.release_camera()
     cv2.destroyAllWindows()
+"""
