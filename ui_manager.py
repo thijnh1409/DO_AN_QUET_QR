@@ -349,9 +349,7 @@ class ScanPage(ctk.CTkFrame):
                 )
                 
                 # Tự động copy vào Clipboard (Bộ nhớ đệm máy tính)
-                self.clipboard_clear()
-                self.clipboard_append(str(content))
-                self.update()
+                self.controller.copy_to_clipboard(content, self.btn_copy)
                 
                 # Cập nhật nút Copy thành Tích xanh tạm thời (nếu bạn có dùng nút Copy)
                 if hasattr(self, 'btn_copy'):
@@ -440,9 +438,7 @@ class ScanPage(ctk.CTkFrame):
             )
             
             # Tự động copy vào bộ nhớ đệm
-            self.clipboard_clear()
-            self.clipboard_append(str(content))
-            self.update()
+            self.controller.copy_to_clipboard(content, self.btn_copy)
             
             try:
                 from data_manager import save_scan_log
@@ -550,7 +546,7 @@ class ScanPage(ctk.CTkFrame):
         info_frame = ctk.CTkFrame(row_frame, fg_color="transparent")
         info_frame.pack(side="left", fill="both", expand=True, pady=5)
         
-        display_content = content if len(content) <= 35 else content[:32] + "..."
+        display_content = content if len(content) <= 33 else content[:30] + "..."
         
         content_lbl = ctk.CTkLabel(info_frame, text=display_content, font=("Space Grotesk", 12, "bold"), text_color="#1a1a1a", anchor="w")
         content_lbl.pack(fill="x")
@@ -560,13 +556,7 @@ class ScanPage(ctk.CTkFrame):
 
         # 3. NÚT COPY CHO TỪNG DÒNG
         def copy_this_row():
-            self.clipboard_clear()
-            self.clipboard_append(content) # Lưu ý: Copy nội dung GỐC, không phải nội dung bị cắt
-            self.update()
-            
-            # Hiệu ứng tích xanh báo thành công
-            btn_copy.configure(text="✅", text_color="#1D9E75")
-            self.after(1000, lambda: btn_copy.configure(text="📋", text_color="#555"))
+            self.controller.copy_to_clipboard(content, btn_copy)
 
         btn_copy = ctk.CTkButton(row_frame, text="📋", width=30, height=30,
                                  fg_color="transparent", text_color="#555",
@@ -623,12 +613,7 @@ class HistoryPage(ctk.CTkFrame):
         self.scroll_list.pack(fill="both", expand=True, padx=10, pady=10)
         
         self.history_widgets = []
-        self.load_dummy_data()
 
-    def load_dummy_data(self):
-        self.add_history_row("https://github.com/thijnh1409", "URL", "Camera", "14:30 - 26/04/2026")
-        self.add_history_row("0901234567", "Liên hệ", "File ảnh", "10:15 - 25/04/2026")
-        self.add_history_row("Xin chào các bạn nhóm 8, đồ án tuyệt quá!", "Văn bản", "Camera", "09:00 - 24/04/2026")
 
     def add_history_row(self, content, qr_type, source, time_str):
         row = ctk.CTkFrame(self.scroll_list, fg_color="transparent", height=50)
@@ -664,10 +649,10 @@ class HistoryPage(ctk.CTkFrame):
 
         self.history_widgets.append((row, line))
 
-    def copy_to_clipboard(self, text):
-        self.clipboard_clear()
-        self.clipboard_append(text)
-        print(f"Đã copy: {text}")
+    # def copy_to_clipboard(self, text):
+    #     self.clipboard_clear()
+    #     self.clipboard_append(text)
+    #     print(f"Đã copy: {text}")
 
     def delete_row(self, row_widget):
         for row, line in self.history_widgets:
