@@ -3,7 +3,7 @@ import tkinter as tk
 from tkinter import filedialog
 from PIL import Image, ImageOps
 from qr_decoder import QRDecoder
-from data_manager import save_scan_log, load_scan_logs
+from data_manager import save_scan_log, load_scan_logs, clear_scan_logs, delete_scan_log
 import sys
 import os
 import cv2
@@ -72,7 +72,7 @@ def make_icon_button(parent, icon: str, command, hover_color: str = "#F0F0F0",
 
 
 def fit_image_to_box(pil_img: Image.Image, box_w: int, box_h: int) -> ctk.CTkImage:
-    """Thu/phóng ảnh PIL lấp đầy khung (box_w × box_h), trả về CTkImage."""
+    """Thu/phóng ảnh PIL lấp đầy khung (box_w x box_h), trả về CTkImage."""
     fitted = ImageOps.fit(pil_img, (box_w, box_h), Image.Resampling.LANCZOS)
     return ctk.CTkImage(light_image=fitted, dark_image=fitted, size=(box_w, box_h))
 
@@ -136,7 +136,7 @@ ctk.set_appearance_mode("light")
 class QRCodeApp(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("AI QR Scanner Pro")
+        self.title("AI QR Scanner - Nhóm 8")
         self.geometry("1000x650")
         self.configure(fg_color=COLOR_BG)
 
@@ -568,6 +568,10 @@ class ScanPage(ctk.CTkFrame):
         self._recent_rows.append((content, time_str, widget))
         widget.pack(fill="x", pady=(0, 4),
                     before=children[0] if children else None)
+        # Bắn tín hiệu sang trang Toàn bộ Lịch sử
+        hist_page = self.controller.frames.get("HistoryPage") 
+        if hist_page and hasattr(hist_page, 'add_new_row_to_top'):
+            hist_page.add_new_row_to_top(content, qr_type, time_str)
 
     def delete_history_row(self, content: str, time_str: str):
         """
@@ -613,9 +617,9 @@ class HistoryPage(ctk.CTkFrame):
         header.pack(fill="x", padx=2, pady=2)
         ctk.CTkLabel(header, text="NỘI DUNG MÃ QR",
                      font=(FONT, 11, "bold"), text_color="#888").pack(side="left", padx=(65, 0))
-        ctk.CTkLabel(header, text="THAO TÁC",
-                     font=(FONT, 11, "bold"), text_color="#888").pack(side="right", padx=(0, 25))
         ctk.CTkLabel(header, text="THỜI GIAN",
+                     font=(FONT, 11, "bold"), text_color="#888").pack(side="right", padx=(0, 25))
+        ctk.CTkLabel(header, text="THAO TÁC",
                      font=(FONT, 11, "bold"), text_color="#888").pack(side="right", padx=(0, 100))
 
         self.scroll_list = ctk.CTkScrollableFrame(list_frame, fg_color="transparent")
@@ -624,12 +628,6 @@ class HistoryPage(ctk.CTkFrame):
     def _build_toolbar(self, body):
         toolbar = ctk.CTkFrame(body, fg_color="transparent", height=50)
         toolbar.pack(fill="x", pady=(0, 15))
-
-        self.search_entry = ctk.CTkEntry(
-            toolbar, placeholder_text="🔍 Tìm kiếm nội dung...",
-            width=250, height=40, font=(FONT, 13),
-            fg_color="white", border_width=1, border_color="#E0DED8", corner_radius=8)
-        self.search_entry.pack(side="left")
 
         self.filter_combo = ctk.CTkComboBox(
             toolbar, values=["Tất cả", "URL", "Văn bản", "Liên hệ", "WiFi"],
@@ -670,9 +668,32 @@ class HistoryPage(ctk.CTkFrame):
         )
         widget.pack(fill="x", pady=(0, 4))
         self.history_widgets.append((content, time_str, widget))
+    
+    def add_new_row_to_top(self, content, qr_type, time_str):
+        """Hàm này nhận lệnh từ ScanPage để cập nhật nóng 1 dòng mới lên đầu trang Lịch sử"""
+        current_rows = self.scroll_list.winfo_children()
+        
+        item = HistoryItemWidget(
+            self.scroll_list, 
+            content, 
+            qr_type, 
+            time_str, 
+            self.controller.copy_to_clipboard, 
+            delete_func=self.delete_row
+        )
+        
+        # Đẩy nó lên trên cùng của danh sách
+        item.pack(fill="x", pady=(0, 2), before=current_rows[0] if current_rows else None)
+        
+        # Đừng quên đưa nó vào mảng quản lý để sau này còn xóa được
+        self.history_widgets.append((content, time_str, item))
 
     def delete_row(self, widget: HistoryItemWidget, content: str, time_str: str):
         """Xóa dòng khỏi HistoryPage VÀ đồng bộ xóa dòng tương ứng ở ScanPage."""
+
+        # 1. XÓA FILE THẬT TRƯỚC
+        delete_scan_log(content, time_str)
+        
         # Xóa khỏi danh sách nội bộ
         self.history_widgets = [(c, t, w) for c, t, w in self.history_widgets if w is not widget]
         widget.destroy()
@@ -683,9 +704,14 @@ class HistoryPage(ctk.CTkFrame):
             scan_page.delete_history_row(content, time_str)
 
     def clear_all_history(self):
+        """Xóa toàn bộ lịch sử khỏi cả HistoryPage và ScanPage."""
+        clear_scan_logs()
+
+        # 2. Xóa sạch UI bên trang Lịch sử
         for _, _, widget in self.history_widgets:
             widget.destroy()
         self.history_widgets.clear()
+
         # Xóa toàn bộ ở ScanPage luôn
         scan_page = self.controller.frames.get("ScanPage")
         if scan_page:
@@ -694,8 +720,33 @@ class HistoryPage(ctk.CTkFrame):
             scan_page._recent_rows.clear()
 
     def _export_csv(self):
-        """Placeholder – kết nối logic xuất CSV tại đây."""
-        print("Xuất CSV chưa được triển khai.")
+        """Nhiệm vụ: Tương tác với người dùng (Hộp thoại chọn file, Thông báo)"""
+        from tkinter import filedialog, messagebox
+        from data_manager import load_scan_logs, export_to_csv_logic #
+
+        # 1. Lấy dữ liệu
+        logs = load_scan_logs()
+        if not logs:
+            messagebox.showinfo("Thông báo", "Lịch sử trống!")
+            return
+
+        # 2. Hỏi nơi lưu (UI)
+        file_path = filedialog.asksaveasfilename(
+            title="Lưu lịch sử",
+            defaultextension=".csv",
+            filetypes=[("CSV File", "*.csv")],
+            initialfile="Lich_Su_Quet_QR.csv"
+        )
+        
+        if not file_path:
+            return
+
+        # 3. Ra lệnh cho data_manager ghi file (Logic)
+        try:
+            export_to_csv_logic(file_path, logs)
+            messagebox.showinfo("Thành công", f"Đã xuất {len(logs)} dòng ra file CSV!")
+        except Exception as e:
+            messagebox.showerror("Lỗi", f"Không thể xuất file: {e}")
 
 
 # ─────────────────────────────────────────────────────────────

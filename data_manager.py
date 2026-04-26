@@ -76,3 +76,47 @@ def clear_scan_logs():
         with open(LOG_FILE_PATH, "w", encoding="utf-8") as f:
             f.write("")
 
+def clear_scan_logs():
+    """Xóa trắng toàn bộ file lịch sử"""
+    try:
+        # Mở file ở chế độ 'w' (write) để xóa sạch dữ liệu cũ
+        if os.path.exists(LOG_FILE_PATH):
+            with open(LOG_FILE_PATH, "w", encoding="utf-8") as f:
+                pass 
+    except Exception as e:
+        print(f"Lỗi khi xóa toàn bộ file lịch sử: {e}")
+
+def delete_scan_log(content, time_str):
+    """Tìm và xóa đúng 1 dòng lịch sử khớp với nội dung và thời gian"""
+    try:
+        # 1. Đọc lại toàn bộ dữ liệu hiện có
+        logs = load_scan_logs()
+        
+        # 2. Lọc ra danh sách mới (Bỏ qua dòng có nội dung và thời gian trùng khớp)
+        new_logs = [log for log in logs if not (log["content"] == content and log["time"] == time_str)]
+        
+        # 3. Ghi đè danh sách mới vào file (giữ đúng định dạng cũ của bạn)
+        with open(LOG_FILE_PATH, "w", encoding="utf-8") as f:
+            for index, log in enumerate(new_logs):
+                # Cập nhật lại số thứ tự (STT) cho liền mạch sau khi xóa
+                stt = index + 1
+                f.write(f"{stt} | {log['time']} | {log['type']} | {log['source']} | {log['content']}\n")
+                
+    except Exception as e:
+        print(f"Lỗi khi xóa dòng lịch sử: {e}")
+
+def export_to_csv_logic(file_path, logs):
+    """Nhiệm vụ: Chỉ ghi dữ liệu ra file, không hiện thông báo UI"""
+    import csv
+    # Dùng 'utf-8-sig' để hỗ trợ tiếng Việt trên Excel
+    with open(file_path, mode='w', newline='', encoding='utf-8-sig') as file:
+        writer = csv.writer(file)
+        writer.writerow(["STT", "Thời gian", "Loại mã QR", "Nguồn quét", "Nội dung"])
+        for log in logs:
+            writer.writerow([
+                log.get("stt", ""), 
+                log.get("time", ""), 
+                log.get("type", ""), 
+                log.get("source", ""), 
+                log.get("content", "")
+            ])
