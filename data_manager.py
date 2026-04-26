@@ -76,10 +76,3 @@ def clear_scan_logs():
         with open(LOG_FILE_PATH, "w", encoding="utf-8") as f:
             f.write("")
 
-if __name__ == "__main__":
-    # Test thử file độc lập
-    print("Test ghi dữ liệu...")
-    save_scan_log("https://hcmute.edu.vn", "URL", "Camera")
-    save_scan_log("0912345678", "Liên hệ", "File ảnh")
-    print("Dữ liệu đã lưu:")
-    print(load_scan_logs())
