@@ -153,6 +153,21 @@ class QRCodeApp(ctk.CTk):
                           text_color="white" if pid == page_id else "gray")
         self.frames[frame_class_name].tkraise()
 
+    def copy_to_clipboard(self, content, button=None):
+        """Hàm dùng chung cho TOÀN BỘ APP: Xử lý lưu bộ nhớ đệm và hiệu ứng nút"""
+        if not content or content in ["Chưa có dữ liệu", "Đang xử lý ảnh..."]:
+            return
+
+        self.clipboard_clear()
+        self.clipboard_append(str(content))
+        self.update()
+
+        if button is not None:
+            old_text = button.cget("text")
+            old_color = button.cget("text_color")
+            button.configure(text="✅", text_color="#1D9E75")
+            self.after(1000, lambda: button.configure(text=old_text, text_color=old_color))
+
 # ==========================================
 # CÁC TRANG CON
 # ==========================================
@@ -241,8 +256,11 @@ class ScanPage(ctk.CTkFrame):
         hist_sec.pack(fill="both", expand=True, padx=15)
         ctk.CTkLabel(hist_sec, text="LỊCH SỬ GẦN ĐÂY", font=("Space Grotesk", 10, "bold"), text_color="#aaa").pack(anchor="w")
         
-        # Để tạm Label trống cho History (Phần này sẽ kết nối với HistoryPage sau)
-        ctk.CTkLabel(hist_sec, text="Lịch sử hiển thị ở Tab Lịch sử", text_color="#ddd").pack(pady=20)
+        # Tạo khung cuộn (ScrollableFrame) để chứa các dòng lịch sử
+        self.hist_list = ctk.CTkScrollableFrame(hist_sec, fg_color="transparent", height=400)
+        self.hist_list.pack(fill="both", expand=True, pady=5)
+
+        self.load_recent_history()
 
 
     # ================= THỦ THUẬT XÓA ẢNH AN TOÀN =================
@@ -254,10 +272,8 @@ class ScanPage(ctk.CTkFrame):
         
         self.display_label.configure(image=empty_ctk, text=text_str)
         self.display_label.image = empty_ctk # Bắt buộc phải lưu tham chiếu
-    # ================= LOGIC CAMERA =================
 
     # ================= LOGIC CAMERA =================
-    
     def toggle_camera(self):
         if not self.is_scanning:
             # BẬT CAMERA
@@ -344,10 +360,13 @@ class ScanPage(ctk.CTkFrame):
 
                 # Lưu dữ liệu
                 try:
-                    from data_manager import save_scan_log
-                    save_scan_log(str(content), str(qr_type), "Camera")
-                except Exception:
-                    pass
+                    # Lưu vào file text và lấy thời gian trả về
+                    time_str = save_scan_log(str(content), str(qr_type), "Camera")
+                    
+                    # Ném kết quả đó lên giao diện Lịch sử ngay lập tức
+                    self.add_history_row(str(content), str(qr_type), time_str)
+                except Exception as e:
+                    print("Lỗi lưu lịch sử:", e)
 
         except Exception as e:
             print(f"Lỗi xử lý khung hình: {e}")
@@ -427,9 +446,13 @@ class ScanPage(ctk.CTkFrame):
             
             try:
                 from data_manager import save_scan_log
-                save_scan_log(str(content), qr_type, "File ảnh")
-            except Exception:
-                pass
+                # Lưu vào file text và lấy thời gian trả về
+                time_str = save_scan_log(str(content), qr_type, "File ảnh")
+                
+                # Ném kết quả đó lên giao diện Lịch sử ngay lập tức
+                self.add_history_row(str(content), qr_type, time_str)
+            except Exception as e:
+                print("Lỗi lưu lịch sử file:", e)
             print(f"Quét file thành công: {content}")
 
         def _show_error(msg: str):
@@ -479,23 +502,77 @@ class ScanPage(ctk.CTkFrame):
         threading.Thread(target=_decode_in_thread, daemon=True).start()
         
     def copy_result(self):
-        # 1. Lấy nội dung đang hiển thị trên Label kết quả
         content = self.res_label.cget("text")
+        # Gọi hàm từ controller
+        self.controller.copy_to_clipboard(content, self.btn_copy)
+    
+    # ================= LOGIC LỊCH SỬ GẦN ĐÂY =================
+    
+    def load_recent_history(self):
+        """Tải 10 lịch sử mới nhất từ file khi vừa mở ứng dụng lên"""
+        try:
+            from data_manager import load_scan_logs
+            logs = load_scan_logs()
+            
+            # Chỉ lấy tối đa 10 dòng gần nhất để tránh lag trang Quét (dùng [::-1] để đảo ngược mảng)
+            recent_logs = logs[::-1][:10] 
+            
+            for log in recent_logs:
+                # Đưa dữ liệu vào hàm vẽ giao diện
+                self.add_history_row(log["content"], log["type"], log["time"])
+        except ImportError:
+            pass
+        except Exception as e:
+            print(f"Lỗi tải lịch sử gần đây: {e}")
+
+    def add_history_row(self, content, qr_type, time_str):
+        """Tạo một dòng giao diện chứa thông tin 1 mã QR và nhét vào đầu hist_list"""
+        MAX_RECENT = 10
+        current_rows = self.hist_list.winfo_children()
         
-        # 2. Kiểm tra nếu có dữ liệu thật mới copy
-        if content and content not in ["Chưa có dữ liệu", "Đang xử lý ảnh..."]:
-            # --- ĐÂY LÀ LỆNH LƯU VÀO BỘ NHỚ ĐỆM MÁY TÍNH ---
-            self.clipboard_clear()        # Xóa bộ nhớ đệm cũ
-            self.clipboard_append(content) # Nạp nội dung mới vào bộ nhớ đệm
-            self.update()                  # Cập nhật trạng thái hệ thống
-            # -----------------------------------------------
+        if len(current_rows) >= MAX_RECENT:
+            current_rows[-1].destroy() 
+
+        # --- TẠO DÒNG MỚI ---
+        row_frame = ctk.CTkFrame(self.hist_list, fg_color="#F7F6F2", corner_radius=8, height=60)
+        row_frame.pack(fill="x", pady=(0, 8), before=current_rows[0] if current_rows else None)
+        row_frame.pack_propagate(False)
+
+        # 1. Icon
+        icon = "🔗" if "URL" in qr_type or "Website" in qr_type else "📄"
+        if "Liên hệ" in qr_type: icon = "👤"
+        if "WiFi" in qr_type: icon = "📶"
+
+        icon_lbl = ctk.CTkLabel(row_frame, text=icon, font=("Segoe UI Emoji", 20))
+        icon_lbl.pack(side="left", padx=15)
+
+        # 2. Cột nội dung chính
+        info_frame = ctk.CTkFrame(row_frame, fg_color="transparent")
+        info_frame.pack(side="left", fill="both", expand=True, pady=5)
+        
+        display_content = content if len(content) <= 35 else content[:32] + "..."
+        
+        content_lbl = ctk.CTkLabel(info_frame, text=display_content, font=("Space Grotesk", 12, "bold"), text_color="#1a1a1a", anchor="w")
+        content_lbl.pack(fill="x")
+        
+        type_lbl = ctk.CTkLabel(info_frame, text=f"{qr_type} • {time_str}", font=("Space Grotesk", 10), text_color="#888", anchor="w")
+        type_lbl.pack(fill="x")
+
+        # 3. NÚT COPY CHO TỪNG DÒNG
+        def copy_this_row():
+            self.clipboard_clear()
+            self.clipboard_append(content) # Lưu ý: Copy nội dung GỐC, không phải nội dung bị cắt
+            self.update()
             
-            # Hiệu ứng đổi màu nút để người dùng biết đã copy xong
-            self.btn_copy.configure(text="✅", text_color="#1D9E75")
-            # Sau 1 giây đổi lại icon cũ
-            self.after(1000, lambda: self.btn_copy.configure(text="📋", text_color="#555"))
-            
-            print("Đã lưu vào bộ nhớ đệm máy tính!") # Cái này in ra để mình kiểm soát thôi
+            # Hiệu ứng tích xanh báo thành công
+            btn_copy.configure(text="✅", text_color="#1D9E75")
+            self.after(1000, lambda: btn_copy.configure(text="📋", text_color="#555"))
+
+        btn_copy = ctk.CTkButton(row_frame, text="📋", width=30, height=30,
+                                 fg_color="transparent", text_color="#555",
+                                 hover_color="#E0DED8", corner_radius=8,
+                                 command=copy_this_row)
+        btn_copy.pack(side="right", padx=10)
 
 class HistoryPage(ctk.CTkFrame):
     def __init__(self, parent, controller):
