@@ -6,6 +6,8 @@ from qr_decoder import QRDecoder
 from data_manager import save_scan_log # Giả sử hàm này trong data_manager
 import sys
 import os
+import numpy as np
+import threading
 
 def resource_path(relative_path):
     """ Lấy đường dẫn tuyệt đối tới tài nguyên, dùng cho cả Dev và PyInstaller """
@@ -119,13 +121,13 @@ class QRCodeApp(ctk.CTk):
 
         self.create_nav_button("scan_page", "📷\nQuét", is_active=True)
         self.create_nav_button("history_page", "🕒\nLịch sử")
-        self.create_nav_button("create_page", "✨\nTạo mã")
+        # self.create_nav_button("create_page", "✨\nTạo mã")
 
         # Main Content
         self.main_content = ctk.CTkFrame(self.main_app_frame, fg_color="transparent", corner_radius=0)
         self.main_content.pack(side="right", fill="both", expand=True)
         
-        for F in (ScanPage, HistoryPage, CreatePage):
+        for F in (ScanPage, HistoryPage):
             page_name = F.__name__
             frame = F(parent=self.main_content, controller=self)
             self.frames[page_name] = frame
@@ -254,6 +256,8 @@ class ScanPage(ctk.CTkFrame):
         self.display_label.image = empty_ctk # Bắt buộc phải lưu tham chiếu
     # ================= LOGIC CAMERA =================
 
+    # ================= LOGIC CAMERA =================
+    
     def toggle_camera(self):
         if not self.is_scanning:
             # BẬT CAMERA
@@ -286,13 +290,12 @@ class ScanPage(ctk.CTkFrame):
 
             self.clear_display("Nhấn 'Bật Camera' để bắt đầu")
 
-
     def run_camera_loop(self):
         if not self.is_scanning or self.decoder is None:
             return
 
         try:
-            # Lấy dữ liệu từ decoder
+            # Lấy dữ liệu từ decoder (Truy cập trực tiếp dataclass)
             result = self.decoder.get_frame_and_data()
 
             # Bắt lỗi mất kết nối Camera
@@ -319,7 +322,7 @@ class ScanPage(ctk.CTkFrame):
                     size=(target_w, target_h)
                 )
                 self.display_label.configure(image=img_ctk, text="")
-                self.display_label.image = img_ctk  # keep reference to prevent GC
+                self.display_label._image = img_ctk  # Giữ tham chiếu ảnh an toàn
 
             # Xử lý khi quét trúng mã QR
             if content is not None and str(content).strip():
@@ -329,8 +332,19 @@ class ScanPage(ctk.CTkFrame):
                     font=("Space Grotesk", 14, "bold")
                 )
                 
+                # Tự động copy vào Clipboard (Bộ nhớ đệm máy tính)
+                self.clipboard_clear()
+                self.clipboard_append(str(content))
+                self.update()
+                
+                # Cập nhật nút Copy thành Tích xanh tạm thời (nếu bạn có dùng nút Copy)
+                if hasattr(self, 'btn_copy'):
+                    self.btn_copy.configure(text="✅", text_color="#1D9E75")
+                    self.after(1000, lambda: self.btn_copy.configure(text="📋", text_color="#555"))
+
                 # Lưu dữ liệu
                 try:
+                    from data_manager import save_scan_log
                     save_scan_log(str(content), str(qr_type), "Camera")
                 except Exception:
                     pass
@@ -341,7 +355,6 @@ class ScanPage(ctk.CTkFrame):
         # Lặp lại sau 15ms
         self.after(15, self.run_camera_loop)
 
-
     def destroy(self):
         """Đảm bảo camera được tắt kể cả khi bấm dấu X tắt cửa sổ."""
         if getattr(self, 'decoder', None):
@@ -350,6 +363,7 @@ class ScanPage(ctk.CTkFrame):
         super().destroy()
 
     # ================= LOGIC FILE ẢNH =================
+    
     def switch_mode(self, mode):
         if self.is_scanning:
             self.toggle_camera()
@@ -368,25 +382,101 @@ class ScanPage(ctk.CTkFrame):
             self.cam_badge.pack(side="right", padx=25)
 
     def open_file_dialog(self, event):
-        if self.tabs.get() == "Từ file ảnh":
-            file_path = filedialog.askopenfilename(
-                title="Chọn ảnh QR",
-                filetypes=[("Image Files", "*.png *.jpg *.jpeg *.bmp")]
+        if self.tabs.get() != "Từ file ảnh":
+            return
+
+        # Khóa an toàn: Bỏ qua click nếu máy đang bận quét ảnh trước đó
+        if getattr(self, '_file_scanning', False):
+            return
+
+        file_path = filedialog.askopenfilename(
+            title="Chọn ảnh QR",
+            filetypes=[("Image Files", "*.png *.jpg *.jpeg *.bmp")]
+        )
+        
+        if not file_path:
+            return
+
+        # 1. HIỂN THỊ ẢNH LÊN GIAO DIỆN
+        img = Image.open(file_path)
+        img.thumbnail((500, 350)) # Thu nhỏ ảnh nhưng giữ tỷ lệ
+        img_ctk = ctk.CTkImage(light_image=img, dark_image=img, size=(img.width, img.height))
+        
+        self.display_label.configure(image=img_ctk, text="")
+        self.display_label._image = img_ctk # Giữ tham chiếu ảnh
+
+        self.res_label.configure(text="Đang xử lý ảnh...", text_color="#aaa", font=("Space Grotesk", 12))
+        self.update() # Ép giao diện cập nhật chữ "Đang xử lý..." ngay lập tức
+
+        # 2. XỬ LÝ GIẢI MÃ DƯỚI NỀN (Giữ cho UI mượt mà)
+        self._file_scanning = True
+
+        def _show_result(content: str, qr_type: str = "Từ file"):
+            """Hàm gọi trên luồng chính sau khi quét thành công."""
+            self._file_scanning = False
+            self.res_label.configure(
+                text=str(content),
+                text_color="#1D9E75",
+                font=("Space Grotesk", 14, "bold")
             )
             
-            if file_path:
-                img = Image.open(file_path)
+            # Tự động copy vào bộ nhớ đệm
+            self.clipboard_clear()
+            self.clipboard_append(str(content))
+            self.update()
+            
+            try:
+                from data_manager import save_scan_log
+                save_scan_log(str(content), qr_type, "File ảnh")
+            except Exception:
+                pass
+            print(f"Quét file thành công: {content}")
+
+        def _show_error(msg: str):
+            """Hàm gọi trên luồng chính khi quét thất bại."""
+            self._file_scanning = False
+            self.res_label.configure(
+                text=msg,
+                text_color="#E74C3C",
+                font=("Space Grotesk", 12)
+            )
+
+        def _decode_in_thread():
+            try:
+                import cv2
+                from qreader import QReader
                 
-                # SỬA LỖI: Tuyệt đối không dùng ImageTk.PhotoImage nữa, chỉ dùng CTkImage
-                # Dùng thumbnail để thu nhỏ ảnh mà KHÔNG làm mất tỷ lệ thật (Aspect Ratio)
-                img.thumbnail((500, 350))
-                img_ctk = ctk.CTkImage(light_image=img, dark_image=img, size=(img.width, img.height))
+                # Khởi tạo AI một lần duy nhất (Singleton)
+                if not hasattr(self, 'file_qreader'):
+                    print("Đang tải mô hình AI cho File ảnh...")
+                    self.file_qreader = QReader()
+
+                # SỬA LỖI: Đọc ảnh hỗ trợ tên file Tiếng Việt trên Windows
+                import numpy as np
+                img_cv2 = cv2.imdecode(np.fromfile(file_path, dtype=np.uint8), cv2.IMREAD_COLOR)
                 
-                self.display_label.configure(image=img_ctk, text="")
-                self.display_label.image = img_ctk # Bắt buộc phải lưu tham chiếu
-                
-                self.res_label.configure(text="Đang xử lý ảnh...", text_color="#aaa")
-                print(f"Đã chọn file: {file_path}")
+                if img_cv2 is None:
+                    raise ValueError("Không thể đọc file ảnh (Đường dẫn lỗi hoặc định dạng sai)")
+
+                img_rgb = cv2.cvtColor(img_cv2, cv2.COLOR_BGR2RGB)
+                decoded_texts = self.file_qreader.detect_and_decode(image=img_rgb)
+
+                # Lọc bỏ các kết quả None (Mã không đọc được)
+                valid = [t for t in decoded_texts if t is not None]
+
+                if valid:
+                    content = valid[0]
+                    # Ném kết quả về luồng chính UI một cách an toàn
+                    self.after(0, lambda: _show_result(content))
+                else:
+                    self.after(0, lambda: _show_error("Không tìm thấy mã QR nào"))
+
+            except Exception as e:
+                print(f"Lỗi giải mã file: {e}")
+                self.after(0, lambda: _show_error("Lỗi đọc file ảnh!"))
+
+        import threading
+        threading.Thread(target=_decode_in_thread, daemon=True).start()
         
     def copy_result(self):
         # 1. Lấy nội dung đang hiển thị trên Label kết quả
@@ -516,10 +606,10 @@ class HistoryPage(ctk.CTkFrame):
             line.destroy()
         self.history_widgets.clear()
 
-class CreatePage(ctk.CTkFrame):
-    def __init__(self, parent, controller):
-        super().__init__(parent, fg_color="transparent")
-        ctk.CTkLabel(self, text="Trang Tạo Mã (Đang phát triển)", font=("Space Grotesk", 20)).pack(expand=True)
+# class CreatePage(ctk.CTkFrame):
+#     def __init__(self, parent, controller):
+#         super().__init__(parent, fg_color="transparent")
+#         ctk.CTkLabel(self, text="Trang Tạo Mã (Đang phát triển)", font=("Space Grotesk", 20)).pack(expand=True)
 
 if __name__ == "__main__":
     app = QRCodeApp()
