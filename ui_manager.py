@@ -1,7 +1,21 @@
 import customtkinter as ctk
 import tkinter as tk
-from PIL import Image
+from tkinter import filedialog
+from PIL import Image, ImageTk, ImageOps
+from qr_decoder import QRDecoder
+from data_manager import save_scan_log # Giả sử hàm này trong data_manager
+import sys
 import os
+
+def resource_path(relative_path):
+    """ Lấy đường dẫn tuyệt đối tới tài nguyên, dùng cho cả Dev và PyInstaller """
+    try:
+        # PyInstaller tạo ra thư mục tạm và lưu đường dẫn trong _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
 
 # Thiết lập theme
 ctk.set_appearance_mode("light")
@@ -28,8 +42,8 @@ class QRCodeApp(ctk.CTk):
         self.intro_frame.pack(fill="both", expand=True)
 
     def load_assets(self):
-        # Đổi tên file thành hcmute-logo.png
-        logo_path = os.path.join("assets", "hcmute-logo.png")
+       # Dùng hàm resource_path thay vì os.path.join thông thường
+        logo_path = resource_path(os.path.join("assets", "hcmute-logo.png"))
         if os.path.exists(logo_path):
             try:
                 img = Image.open(logo_path)
@@ -144,6 +158,11 @@ class QRCodeApp(ctk.CTk):
 class ScanPage(ctk.CTkFrame):
     def __init__(self, parent, controller):
         super().__init__(parent, fg_color="transparent")
+        self.controller = controller
+        
+        # --- CÁC BIẾN LOGIC MỚI ---
+        self.decoder = None  # Biến chứa bộ giải mã camera
+        self.is_scanning = False # Trạng thái camera
         
         # 1. TOPBAR
         self.topbar = ctk.CTkFrame(self, height=75, fg_color="white", corner_radius=0)
@@ -169,7 +188,7 @@ class ScanPage(ctk.CTkFrame):
         container.grid_columnconfigure(1, weight=1)
         container.grid_rowconfigure(0, weight=1)
 
-        # LEFT
+        # LEFT (Khu vực quét)
         left_p = ctk.CTkFrame(container, fg_color="transparent")
         left_p.grid(row=0, column=0, sticky="nsew", padx=(25, 10), pady=20)
 
@@ -180,52 +199,213 @@ class ScanPage(ctk.CTkFrame):
 
         self.view_box = ctk.CTkFrame(left_p, fg_color="#1a1a1a", corner_radius=16)
         self.view_box.pack(fill="both", expand=True)
+
+        # THÊM DÒNG NÀY: Ngăn không cho nội dung bên trong đẩy khung phình ra
+        self.view_box.pack_propagate(False)
+        
         self.display_label = ctk.CTkLabel(self.view_box, text="Nhấn 'Bật Camera' để bắt đầu", text_color="#555")
-        self.display_label.pack(expand=True)
+        self.display_label.place(relx=0.5, rely=0.5, anchor="center")
+        
+        # Gán sự kiện click vào màn hình đen để chọn ảnh (khi ở chế độ File)
+        self.display_label.bind("<Button-1>", self.open_file_dialog)
 
         self.btn_toggle = ctk.CTkButton(left_p, text="Bật Camera", fg_color="#1D9E75", corner_radius=10, 
                                         height=40, command=self.toggle_camera)
         self.btn_toggle.pack(pady=15)
 
-        # RIGHT
+        # RIGHT (Khu vực kết quả)
         right_p = ctk.CTkFrame(container, fg_color="white", corner_radius=0)
         right_p.grid(row=0, column=1, sticky="nsew")
 
         res_sec = ctk.CTkFrame(right_p, fg_color="transparent")
         res_sec.pack(fill="x", padx=15, pady=20)
         ctk.CTkLabel(res_sec, text="KẾT QUẢ", font=("Space Grotesk", 10, "bold"), text_color="#aaa").pack(anchor="w")
+
         self.res_box = ctk.CTkFrame(res_sec, fg_color="#F7F6F2", corner_radius=10)
         self.res_box.pack(fill="x", pady=8)
-        self.res_label = ctk.CTkLabel(self.res_box, text="Chưa có dữ liệu", font=("Space Grotesk", 12), text_color="#999", pady=25)
-        self.res_label.pack()
+
+        self.res_label = ctk.CTkLabel(self.res_box, text="Chưa có dữ liệu", font=("Space Grotesk", 12), 
+                                      text_color="#999", pady=25, wraplength=160)
+        self.res_label.pack(side="left", padx=(15, 5), expand=True, fill="x")
+
+        # Nút Copy 📋
+        self.btn_copy = ctk.CTkButton(self.res_box, text="📋", width=35, height=35, 
+                                      fg_color="transparent", text_color="#555", 
+                                      hover_color="#E0DED8", corner_radius=8,
+                                      command=self.copy_result)
+        self.btn_copy.pack(side="right", padx=10)
 
         hist_sec = ctk.CTkFrame(right_p, fg_color="transparent")
         hist_sec.pack(fill="both", expand=True, padx=15)
         ctk.CTkLabel(hist_sec, text="LỊCH SỬ GẦN ĐÂY", font=("Space Grotesk", 10, "bold"), text_color="#aaa").pack(anchor="w")
-        self.hist_list = ctk.CTkScrollableFrame(hist_sec, fg_color="transparent")
-        self.hist_list.pack(fill="both", expand=True, pady=5)
+        
+        # Để tạm Label trống cho History (Phần này sẽ kết nối với HistoryPage sau)
+        ctk.CTkLabel(hist_sec, text="Lịch sử hiển thị ở Tab Lịch sử", text_color="#ddd").pack(pady=20)
+
+
+    # ================= THỦ THUẬT XÓA ẢNH AN TOÀN =================
+    def clear_display(self, text_str):
+        # Tạo một bức ảnh tàng hình (trong suốt) 1x1 pixel
+        # Kỹ thuật này giúp reset khung camera mà không bao giờ bị lỗi "pyimage doesn't exist"
+        empty_img = Image.new("RGBA", (1, 1), (0, 0, 0, 0))
+        empty_ctk = ctk.CTkImage(light_image=empty_img, size=(1, 1))
+        
+        self.display_label.configure(image=empty_ctk, text=text_str)
+        self.display_label.image = empty_ctk # Bắt buộc phải lưu tham chiếu
+    # ================= LOGIC CAMERA =================
 
     def toggle_camera(self):
-        is_on = self.status_text.cget("text") == "Camera đang tắt"
-        self.btn_toggle.configure(text="Tắt Camera" if is_on else "Bật Camera", 
-                                  fg_color="#E74C3C" if is_on else "#1D9E75")
-        self.cam_badge.configure(fg_color="#EAF3DE" if is_on else "#F5F5F5")
-        self.dot.configure(text_color="#639922" if is_on else "#999")
-        self.status_text.configure(text="Camera đang hoạt động" if is_on else "Camera đang tắt",
-                                   text_color="#3B6D11" if is_on else "#666")
-        self.display_label.configure(text="[ Luồng camera thực tế ]" if is_on else "Nhấn 'Bật Camera' để bắt đầu")
+        if not self.is_scanning:
+            # BẬT CAMERA
+            try:
+                self.decoder = QRDecoder()
+                self.is_scanning = True
 
+                self.btn_toggle.configure(text="Tắt Camera", fg_color="#E74C3C")
+                self.cam_badge.configure(fg_color="#EAF3DE")
+                self.dot.configure(text_color="#639922")
+                self.status_text.configure(text="Camera đang hoạt động", text_color="#3B6D11")
+
+                self.clear_display("")
+                self.run_camera_loop()
+
+            except Exception as e:
+                print(f"Lỗi không thể mở camera: {e}")
+                self.is_scanning = False
+        else:
+            # TẮT CAMERA
+            self.is_scanning = False
+            if getattr(self, 'decoder', None):
+                self.decoder.release_camera()
+                self.decoder = None
+
+            self.btn_toggle.configure(text="Bật Camera", fg_color="#1D9E75")
+            self.cam_badge.configure(fg_color="#F5F5F5")
+            self.dot.configure(text_color="#999")
+            self.status_text.configure(text="Camera đang tắt", text_color="#666")
+
+            self.clear_display("Nhấn 'Bật Camera' để bắt đầu")
+
+
+    def run_camera_loop(self):
+        if not self.is_scanning or self.decoder is None:
+            return
+
+        try:
+            # Lấy dữ liệu từ decoder
+            result = self.decoder.get_frame_and_data()
+
+            # Bắt lỗi mất kết nối Camera
+            if result.frame is None:
+                print("Camera mất kết nối. Đang tắt...")
+                self.toggle_camera()
+                return
+
+            frame_rgb = result.frame
+            content   = result.data
+            qr_type   = result.data_type or "Văn bản"
+
+            # Hiển thị Camera lấp đầy khung
+            img = Image.fromarray(frame_rgb)
+
+            self.view_box.update_idletasks()
+            target_w = self.view_box.winfo_width()
+            target_h = self.view_box.winfo_height()
+
+            if target_w > 10 and target_h > 10:
+                img_fitted = ImageOps.fit(img, (target_w, target_h), Image.Resampling.LANCZOS)
+                img_ctk = ctk.CTkImage(
+                    light_image=img_fitted, dark_image=img_fitted,
+                    size=(target_w, target_h)
+                )
+                self.display_label.configure(image=img_ctk, text="")
+                self.display_label.image = img_ctk  # keep reference to prevent GC
+
+            # Xử lý khi quét trúng mã QR
+            if content is not None and str(content).strip():
+                self.res_label.configure(
+                    text=str(content),
+                    text_color="#1D9E75",
+                    font=("Space Grotesk", 14, "bold")
+                )
+                
+                # Lưu dữ liệu
+                try:
+                    save_scan_log(str(content), str(qr_type), "Camera")
+                except Exception:
+                    pass
+
+        except Exception as e:
+            print(f"Lỗi xử lý khung hình: {e}")
+
+        # Lặp lại sau 15ms
+        self.after(15, self.run_camera_loop)
+
+
+    def destroy(self):
+        """Đảm bảo camera được tắt kể cả khi bấm dấu X tắt cửa sổ."""
+        if getattr(self, 'decoder', None):
+            self.decoder.release_camera()
+            self.decoder = None
+        super().destroy()
+
+    # ================= LOGIC FILE ẢNH =================
     def switch_mode(self, mode):
+        if self.is_scanning:
+            self.toggle_camera()
+
         if mode == "Từ file ảnh":
             self.sub_label.configure(text="Tải ảnh chứa mã QR lên để quét")
-            self.display_label.configure(text="Nhấp để chọn file ảnh")
+            self.clear_display("Nhấp chuột vào đây để chọn file ảnh")
+            self.display_label.configure(cursor="hand2")
             self.btn_toggle.pack_forget()
             self.cam_badge.pack_forget()
         else:
             self.sub_label.configure(text="Hướng camera vào mã cần quét")
-            self.display_label.configure(text="Nhấn 'Bật Camera' để bắt đầu")
+            self.clear_display("Nhấn 'Bật Camera' để bắt đầu")
+            self.display_label.configure(cursor="")
             self.btn_toggle.pack(pady=15)
             self.cam_badge.pack(side="right", padx=25)
+
+    def open_file_dialog(self, event):
+        if self.tabs.get() == "Từ file ảnh":
+            file_path = filedialog.askopenfilename(
+                title="Chọn ảnh QR",
+                filetypes=[("Image Files", "*.png *.jpg *.jpeg *.bmp")]
+            )
+            
+            if file_path:
+                img = Image.open(file_path)
+                
+                # SỬA LỖI: Tuyệt đối không dùng ImageTk.PhotoImage nữa, chỉ dùng CTkImage
+                # Dùng thumbnail để thu nhỏ ảnh mà KHÔNG làm mất tỷ lệ thật (Aspect Ratio)
+                img.thumbnail((500, 350))
+                img_ctk = ctk.CTkImage(light_image=img, dark_image=img, size=(img.width, img.height))
+                
+                self.display_label.configure(image=img_ctk, text="")
+                self.display_label.image = img_ctk # Bắt buộc phải lưu tham chiếu
+                
+                self.res_label.configure(text="Đang xử lý ảnh...", text_color="#aaa")
+                print(f"Đã chọn file: {file_path}")
+        
+    def copy_result(self):
+        # 1. Lấy nội dung đang hiển thị trên Label kết quả
+        content = self.res_label.cget("text")
+        
+        # 2. Kiểm tra nếu có dữ liệu thật mới copy
+        if content and content not in ["Chưa có dữ liệu", "Đang xử lý ảnh..."]:
+            # --- ĐÂY LÀ LỆNH LƯU VÀO BỘ NHỚ ĐỆM MÁY TÍNH ---
+            self.clipboard_clear()        # Xóa bộ nhớ đệm cũ
+            self.clipboard_append(content) # Nạp nội dung mới vào bộ nhớ đệm
+            self.update()                  # Cập nhật trạng thái hệ thống
+            # -----------------------------------------------
+            
+            # Hiệu ứng đổi màu nút để người dùng biết đã copy xong
+            self.btn_copy.configure(text="✅", text_color="#1D9E75")
+            # Sau 1 giây đổi lại icon cũ
+            self.after(1000, lambda: self.btn_copy.configure(text="📋", text_color="#555"))
+            
+            print("Đã lưu vào bộ nhớ đệm máy tính!") # Cái này in ra để mình kiểm soát thôi
 
 class HistoryPage(ctk.CTkFrame):
     def __init__(self, parent, controller):

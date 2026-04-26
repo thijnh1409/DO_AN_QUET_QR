@@ -1,58 +1,85 @@
-"""
-NHIỆM VỤ CỦA FILE DATA_MANAGER:
-1. Nhận dữ liệu từ qr_decoder.py sau khi quét thành công.
-2. Lấy thời gian hiện tại từ hệ thống.
-3. Ghi dữ liệu vào file 'scan_logs.txt' theo định dạng:
-    [STT]: Số thứ tự (1, 2, 3...)
-    [Thời gian]: Ngày giờ quét (VD: 11/04 10:00)
-    [Loại mã]: Phân loại xem nó là cái gì (VD: Website, WiFi, Văn bản, Thẻ liên hệ...)
-    [Nội dung]: Cục dữ liệu gốc quét được (VD: https://hcmute.edu.vn)
-4. Lưu ý: Dùng chế độ 'a' (append) để không làm mất dữ liệu cũ.
-"""
-"""
-Những thư viện cần tham khảo: datetime, pathlib, csv, ...
-"""
-import datetime
-LOG_FILE_PATH = "scan_logs.txt"
-def lay_stt():
-    try:
-        with open(LOG_FILE_PATH,"r",encoding="utf-8") as f:
-            dongs=f.readlines()
-            so_dong=0
-            for dong in dongs:
-                if dong.strip():
-                    so_dong+=1
-        return so_dong +1
-    except FileNotFoundError:
-        return 1
-    except Exception as e:
-        print("Lỗi khác")
-        return 1
-def phan_loai_ma(du_lieu):
-    du_lieu_check = du_lieu.upper()#VIẾT HOA ĐỂ DỄ SO SÁNH
-    if du_lieu_check.startswith(("HTTP://", "HTTPS://")):
-        return "Website"
-    elif du_lieu_check.startswith("WIFI:"):
-        return "WiFi"
-    elif du_lieu_check.startswith("TEL:"):
-        return "Số điện thoại"
-    elif du_lieu_check.strip().startswith("BEGIN:VCARD"):
-        return "Thẻ liên hệ"
-    else:
-        return "Văn bản"
-def luu_du_lieu(du_lieu_quet):
-    if not du_lieu_quet:
-        print("Dữ liệu trống, không lưu!")
-        return
-    stt=lay_stt()#Lây số
-    bay_gio=datetime.datetime.now().strftime("%d/%m %H:%M")## %d/%m: Ngày/Tháng, %H:%M: Giờ:Phút
-    loai_ma=phan_loai_ma(du_lieu_quet)#phân loại
-    text_luu=f"[{stt}] | [{bay_gio}] | [{loai_ma}] | [{du_lieu_quet}]\n"
-    try:
-        with open(LOG_FILE_PATH, "a", encoding="utf-8") as f:
-            f.write(text_luu)
-        print(f"Đã lưu thành công mã số {stt}")
-    except FileNotFoundError:
-        print("Không thấy file")
-    except Exception as e:
-        print("Lỗi khác")
+import os
+import sys
+from datetime import datetime
+
+# Lấy thư mục gốc chứa file .exe đang chạy (hoặc file .py nếu đang dev)
+if getattr(sys, 'frozen', False):
+    application_path = os.path.dirname(sys.executable)
+else:
+    application_path = os.path.dirname(os.path.abspath(__file__))
+
+LOG_FILE_PATH = os.path.join(application_path, "scan_logs.txt")
+
+def save_scan_log(content, qr_type, source="Camera"):
+    """
+    Lưu dữ liệu quét mã QR vào file text.
+    Định dạng: STT | Thời gian | Loại mã | Nguồn | Nội dung
+    """
+    # 1. Lấy thời gian hiện tại
+    now = datetime.now()
+    time_str = now.strftime("%H:%M - %d/%m/%Y")
+
+    # 2. Đọc file để xác định Số Thứ Tự (STT) tiếp theo
+    stt = 1
+    if os.path.exists(LOG_FILE_PATH):
+        with open(LOG_FILE_PATH, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+            # Lọc bỏ các dòng trống
+            valid_lines = [line for line in lines if line.strip() != ""]
+            if valid_lines:
+                try:
+                    # Lấy dòng cuối cùng, cắt ra để lấy số thứ tự
+                    last_line = valid_lines[-1]
+                    last_stt = int(last_line.split("|")[0].strip())
+                    stt = last_stt + 1
+                except ValueError:
+                    stt = len(valid_lines) + 1
+
+    # 3. Tạo chuỗi dữ liệu (Ngăn cách nhau bằng dấu | để dễ đọc lại)
+    log_entry = f"{stt} | {time_str} | {qr_type} | {source} | {content}\n"
+
+    # 4. Ghi nối (append) vào file
+    with open(LOG_FILE_PATH, "a", encoding="utf-8") as f:
+        f.write(log_entry)
+
+    return time_str # Trả về thời gian để cập nhật lên UI
+
+def load_scan_logs():
+    """
+    Đọc dữ liệu từ file text để đưa lên giao diện Lịch sử.
+    """
+    logs = []
+    if os.path.exists(LOG_FILE_PATH):
+        with open(LOG_FILE_PATH, "r", encoding="utf-8") as f:
+            for line in f:
+                if line.strip() == "":
+                    continue
+                parts = [p.strip() for p in line.split("|")]
+                
+                # Đảm bảo dòng có đủ 5 cột dữ liệu
+                if len(parts) >= 5:
+                    logs.append({
+                        "stt": parts[0],
+                        "time": parts[1],
+                        "type": parts[2],
+                        "source": parts[3],
+                        "content": parts[4]
+                    })
+    return logs
+
+def clear_scan_logs():
+    """
+    Xóa toàn bộ lịch sử trong file.
+    """
+    if os.path.exists(LOG_FILE_PATH):
+        # Ghi đè file bằng nội dung rỗng
+        with open(LOG_FILE_PATH, "w", encoding="utf-8") as f:
+            f.write("")
+
+if __name__ == "__main__":
+    # Test thử file độc lập
+    print("Test ghi dữ liệu...")
+    save_scan_log("https://hcmute.edu.vn", "URL", "Camera")
+    save_scan_log("0912345678", "Liên hệ", "File ảnh")
+    print("Dữ liệu đã lưu:")
+    print(load_scan_logs())
