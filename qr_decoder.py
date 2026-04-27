@@ -1,17 +1,3 @@
-"""
-NHIỆM VỤ CỦA FILE QR_DECODER:
-2. Sử dụng thư viện ...  để tìm kiếm và giải mã (decode) mã QR trong ảnh.
-3. Trích xuất dữ liệu thô (chuỗi văn bản/link) từ mã QR.
-4. (Nâng cao) Xác định tọa độ khung hình chữ nhật của mã QR để vẽ vòng bao 
-   lên màn hình, giúp người dùng biết máy đã nhận diện được.
-5. Trả kết quả về cho ui_manager hiển thị và data_manager lưu trữ.
-"""
-
-"""
-Module: qr_decoder.py
-Chức năng: Quản lý Camera, nhận diện, giải mã QR bằng AI (QReader).
-Người phụ trách: Nguyễn Lê Phúc Thịnh
-"""
 
 import time
 import threading
