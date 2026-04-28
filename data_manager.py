@@ -11,59 +11,54 @@ else:
 LOG_FILE_PATH = os.path.join(application_path, "scan_logs.txt")
 
 def save_scan_log(content, qr_type, source="Camera"):
-    """
-    Lưu dữ liệu quét mã QR vào file text.
-    Định dạng: STT | Thời gian | Loại mã | Nguồn | Nội dung
-    """
-    # 1. Lấy thời gian hiện tại
     now = datetime.now()
     time_str = now.strftime("%H:%M - %d/%m/%Y")
 
-    # 2. Đọc file để xác định Số Thứ Tự (STT) tiếp theo
     stt = 1
     if os.path.exists(LOG_FILE_PATH):
         with open(LOG_FILE_PATH, "r", encoding="utf-8") as f:
             lines = f.readlines()
-            # Lọc bỏ các dòng trống
             valid_lines = [line for line in lines if line.strip() != ""]
             if valid_lines:
                 try:
-                    # Lấy dòng cuối cùng, cắt ra để lấy số thứ tự
                     last_line = valid_lines[-1]
-                    last_stt = int(last_line.split("|")[0].strip())
+                    # Bổ sung maxsplit=4 để cắt an toàn
+                    last_stt = int(last_line.split("|", 4)[0].strip())
                     stt = last_stt + 1
                 except ValueError:
                     stt = len(valid_lines) + 1
 
-    # 3. Tạo chuỗi dữ liệu (Ngăn cách nhau bằng dấu | để dễ đọc lại)
-    log_entry = f"{stt} | {time_str} | {qr_type} | {source} | {content}\n"
+    # VÁ LỖI XUỐNG DÒNG: Thay thế \n bằng ký hiệu đặc biệt (vd: \u2028) hoặc <br>
+    safe_content = str(content).replace("\r\n", "<br>").replace("\n", "<br>")
 
-    # 4. Ghi nối (append) vào file
+    log_entry = f"{stt} | {time_str} | {qr_type} | {source} | {safe_content}\n"
+
     with open(LOG_FILE_PATH, "a", encoding="utf-8") as f:
         f.write(log_entry)
 
-    return time_str # Trả về thời gian để cập nhật lên UI
+    return time_str
 
 def load_scan_logs():
-    """
-    Đọc dữ liệu từ file text để đưa lên giao diện Lịch sử.
-    """
     logs = []
     if os.path.exists(LOG_FILE_PATH):
         with open(LOG_FILE_PATH, "r", encoding="utf-8") as f:
             for line in f:
                 if line.strip() == "":
                     continue
-                parts = [p.strip() for p in line.split("|")]
                 
-                # Đảm bảo dòng có đủ 5 cột dữ liệu
+                # VÁ LỖI DẤU | : Cắt tối đa 4 lần để giữ nguyên nội dung cột cuối
+                parts = line.split("|", 4)
+                
                 if len(parts) >= 5:
+                    # Phục hồi lại ký tự xuống dòng khi đưa lên UI
+                    original_content = parts[4].strip().replace("<br>", "\n")
+                    
                     logs.append({
-                        "stt": parts[0],
-                        "time": parts[1],
-                        "type": parts[2],
-                        "source": parts[3],
-                        "content": parts[4]
+                        "stt": parts[0].strip(),
+                        "time": parts[1].strip(),
+                        "type": parts[2].strip(),
+                        "source": parts[3].strip(),
+                        "content": original_content
                     })
     return logs
 
@@ -76,31 +71,17 @@ def clear_scan_logs():
         with open(LOG_FILE_PATH, "w", encoding="utf-8") as f:
             f.write("")
 
-def clear_scan_logs():
-    """Xóa trắng toàn bộ file lịch sử"""
-    try:
-        # Mở file ở chế độ 'w' (write) để xóa sạch dữ liệu cũ
-        if os.path.exists(LOG_FILE_PATH):
-            with open(LOG_FILE_PATH, "w", encoding="utf-8") as f:
-                pass 
-    except Exception as e:
-        print(f"Lỗi khi xóa toàn bộ file lịch sử: {e}")
-
 def delete_scan_log(content, time_str):
-    """Tìm và xóa đúng 1 dòng lịch sử khớp với nội dung và thời gian"""
     try:
-        # 1. Đọc lại toàn bộ dữ liệu hiện có
         logs = load_scan_logs()
-        
-        # 2. Lọc ra danh sách mới (Bỏ qua dòng có nội dung và thời gian trùng khớp)
         new_logs = [log for log in logs if not (log["content"] == content and log["time"] == time_str)]
         
-        # 3. Ghi đè danh sách mới vào file (giữ đúng định dạng cũ của bạn)
         with open(LOG_FILE_PATH, "w", encoding="utf-8") as f:
             for index, log in enumerate(new_logs):
-                # Cập nhật lại số thứ tự (STT) cho liền mạch sau khi xóa
                 stt = index + 1
-                f.write(f"{stt} | {log['time']} | {log['type']} | {log['source']} | {log['content']}\n")
+                # Ghi lại y hệt hàm save, phải mã hóa lại \n
+                safe_content = log['content'].replace("\r\n", "<br>").replace("\n", "<br>")
+                f.write(f"{stt} | {log['time']} | {log['type']} | {log['source']} | {safe_content}\n")
                 
     except Exception as e:
         print(f"Lỗi khi xóa dòng lịch sử: {e}")

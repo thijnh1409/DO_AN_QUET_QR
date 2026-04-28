@@ -1,7 +1,7 @@
-
 import time
 import threading
 import queue
+import gc
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
@@ -63,6 +63,7 @@ class QRDecoder:
     DISPLAY_MAX_LEN  = 25    # max chars shown on-frame before truncation
 
     def __init__(self, camera_index: int = 0):
+        self._camera_index = camera_index   # lưu lại để resume() dùng
         self.cap = cv2.VideoCapture(camera_index)
         if not self.cap.isOpened():
             print("⚠️  CẢNH BÁO: Không tìm thấy Camera! Vui lòng kiểm tra lại thiết bị.")
@@ -206,9 +207,55 @@ class QRDecoder:
 
         return ScanResult(frame=frame_rgb, data=qr_data_result, data_type=qr_type_result)
 
-    def release_camera(self) -> None:
-        """Stop the AI worker and release the camera. Safe to call multiple times."""
-        self._running = False
-        self._ai_thread.join(timeout=2.0)   # wait for worker to finish cleanly
+    def pause(self) -> None:
+        """
+        CHỈ tắt webcam. AI model (QReader) VẪN sống trong RAM.
+        Gọi khi người dùng nhấn 'Tắt Camera'.
+
+        Tại sao xoá và tạo lại cap/queue thay vì chỉ release/flush?
+        - cap.release() KHÔNG giải phóng hoàn toàn buffer nội bộ của OpenCV.
+          del cap + VideoCapture() mới mới thực sự free RAM của OpenCV.
+        - Flush queue bằng vòng lặp chỉ lấy item ra nhưng vẫn giữ tham chiếu
+          đến numpy array trong stack. Tạo queue mới đảm bảo GC thu hồi ngay.
+        """
+        # 1. Giải phóng hoàn toàn buffer OpenCV
         if self.cap.isOpened():
             self.cap.release()
+        del self.cap
+        self.cap = cv2.VideoCapture()   # object rỗng, chưa mở camera nào
+
+        # 2. Tạo queue mới để GC thu hồi numpy array còn sót trong queue cũ
+        self._frame_queue = queue.Queue(maxsize=1)
+
+        # 3. Xoá snapshot (chứa kết quả detection có thể giữ ref đến array)
+        with self._lock:
+            self._snapshot = _DetectionSnapshot(texts=[], detections=[])
+
+        # 4. Ép Python thu hồi RAM ngay, không chờ GC tự chạy
+        gc.collect()
+
+    def resume(self) -> bool:
+        """
+        CHỈ bật webcam. Dùng lại AI model đã có sẵn trong RAM → tức thì.
+        Gọi khi người dùng nhấn 'Bật Camera' (từ lần thứ 2 trở đi).
+        Trả về True nếu mở camera thành công.
+        """
+        self.cap = cv2.VideoCapture(self._camera_index)
+        if not self.cap.isOpened():
+            print("⚠️  CẢNH BÁO: Không tìm thấy Camera!")
+            return False
+        return True
+
+    def shutdown(self) -> None:
+        """
+        Huỷ hoàn toàn: dừng AI thread + đóng webcam.
+        CHỈ gọi khi đóng app — KHÔNG gọi khi tắt camera thông thường.
+        """
+        self._running = False
+        self._ai_thread.join(timeout=2.0)
+        if self.cap.isOpened():
+            self.cap.release()
+
+    def release_camera(self) -> None:
+        """Giữ lại để không breaking change. Dùng shutdown() cho code mới."""
+        self.shutdown()

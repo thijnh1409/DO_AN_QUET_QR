@@ -6,7 +6,7 @@ import customtkinter as ctk
 import tkinter as tk
 
 # PIL: cần ngay khi app khởi động (logo, clear_display, fit_image_to_box)
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, ImageTk
 
 # QRDecoder: class wrapper nhẹ, dùng ở cả camera lẫn quét file → import sẵn
 from qr_decoder import QRDecoder
@@ -352,8 +352,17 @@ class ScanPage(ctk.CTkFrame):
         self.view_box.pack(fill="both", expand=True)
         self.view_box.pack_propagate(False)
 
+        # Canvas thay cho CTkLabel — cập nhật ảnh IN-PLACE, không tạo object mới mỗi frame
+        self.canvas = tk.Canvas(self.view_box, bg="#1a1a1a", highlightthickness=0)
+        self.canvas.pack(fill="both", expand=True)
+        self.canvas.bind("<Button-1>", self.open_file_dialog)
+        self._photo      = None   # ImageTk.PhotoImage duy nhất, tái sử dụng mãi
+        self._canvas_img = None   # ID của item trên canvas
+
+        # Label chữ hướng dẫn (overlay, chỉ hiện khi không có camera)
         self.display_label = ctk.CTkLabel(
-            self.view_box, text="Nhấn 'Bật Camera' để bắt đầu", text_color="#555")
+            self.view_box, text="Nhấn 'Bật Camera' để bắt đầu", text_color="#555",
+            fg_color="transparent")
         self.display_label.place(relx=0.5, rely=0.5, anchor="center")
         self.display_label.bind("<Button-1>", self.open_file_dialog)
 
@@ -397,10 +406,12 @@ class ScanPage(ctk.CTkFrame):
     # ── Helpers ──────────────────────────────────────────────
 
     def clear_display(self, text_str: str):
-        """Reset khung camera về trạng thái rỗng (tránh lỗi pyimage)."""
-        empty = ctk.CTkImage(light_image=Image.new("RGBA", (1, 1), 0), size=(1, 1))
-        self.display_label.configure(image=empty, text=text_str)
-        self.display_label.image = empty
+        """Reset khung hiển thị: xoá canvas, hiện chữ hướng dẫn."""
+        self.canvas.delete("all")
+        self._photo      = None
+        self._canvas_img = None
+        self.display_label.configure(text=text_str)
+        self.display_label.place(relx=0.5, rely=0.5, anchor="center")
 
     def _show_scan_result(self, content: str, qr_type: str):
         """Hiển thị kết quả, lưu log, thêm dòng lịch sử. Dùng chung cho Camera và File."""
@@ -421,7 +432,15 @@ class ScanPage(ctk.CTkFrame):
     def toggle_camera(self):
         if not self.is_scanning:
             try:
-                self.decoder     = QRDecoder()
+                # KIỂM TRA: Nếu chưa có decoder thì tạo mới, nếu có rồi thì resume
+                if self.decoder is None:
+                    self.decoder = QRDecoder()
+                else:
+                    success = self.decoder.resume()
+                    if not success:
+                        print("Không thể mở lại camera.")
+                        return
+
                 self.is_scanning = True
                 self.btn_toggle.configure(text="Tắt Camera", fg_color=COLOR_RED)
                 self.cam_badge.configure(fg_color="#EAF3DE")
@@ -435,8 +454,9 @@ class ScanPage(ctk.CTkFrame):
         else:
             self.is_scanning = False
             if getattr(self, "decoder", None):
-                self.decoder.release_camera()
-                self.decoder = None
+                # DÙNG HÀM PAUSE thay vì release_camera()
+                self.decoder.pause()
+                
             self.btn_toggle.configure(text="Bật Camera", fg_color=COLOR_GREEN)
             self.cam_badge.configure(fg_color="#F5F5F5")
             self.dot.configure(text_color="#999")
@@ -453,13 +473,23 @@ class ScanPage(ctk.CTkFrame):
                 self.toggle_camera()
                 return
 
-            # Vẽ frame lên màn hình
-            self.view_box.update_idletasks()
-            w, h = self.view_box.winfo_width(), self.view_box.winfo_height()
+            # Vẽ frame lên canvas IN-PLACE — không tạo object mới mỗi frame
+            self.canvas.update_idletasks()
+            w, h = self.canvas.winfo_width(), self.canvas.winfo_height()
             if w > 10 and h > 10:
-                img_ctk = fit_image_to_box(Image.fromarray(result.frame), w, h)
-                self.display_label.configure(image=img_ctk, text="")
-                self.display_label.image = img_ctk
+                img = Image.fromarray(result.frame)
+                img = ImageOps.fit(img, (w, h), Image.Resampling.LANCZOS)
+
+                if self._photo is None or self._photo.width() != w or self._photo.height() != h:
+                    # Tạo PhotoImage MỘT LẦN (hoặc khi kích thước thay đổi)
+                    self._photo = ImageTk.PhotoImage(image=img)
+                    self.canvas.delete("all")
+                    self._canvas_img = self.canvas.create_image(0, 0, anchor="nw",
+                                                                image=self._photo)
+                    self.display_label.place_forget()   # ẩn chữ khi có camera
+                else:
+                    # Cập nhật pixel IN-PLACE — không cấp phát RAM mới
+                    self._photo.paste(img)
 
             # Hiển thị kết quả nếu quét trúng
             if result.data and str(result.data).strip():
@@ -471,9 +501,9 @@ class ScanPage(ctk.CTkFrame):
         self.after(15, self.run_camera_loop)
 
     def destroy(self):
-        """Đảm bảo camera được tắt khi đóng cửa sổ."""
+        """Đảm bảo camera và AI được tắt hoàn toàn khi đóng app."""
         if getattr(self, "decoder", None):
-            self.decoder.release_camera()
+            self.decoder.shutdown() # Dùng shutdown() để tắt hẳn thread AI
             self.decoder = None
         super().destroy()
 
@@ -492,6 +522,7 @@ class ScanPage(ctk.CTkFrame):
             self.sub_label.configure(text="Hướng camera vào mã cần quét")
             self.clear_display("Nhấn 'Bật Camera' để bắt đầu")
             self.display_label.configure(cursor="")
+            self.display_label.place(relx=0.5, rely=0.5, anchor="center")
             self.btn_toggle.pack(pady=15)
             self.cam_badge.pack(side="right", padx=25)
 
@@ -509,12 +540,17 @@ class ScanPage(ctk.CTkFrame):
         if not file_path:
             return
 
-        # Hiển thị ảnh lên giao diện ngay lập tức
+        # Hiển thị ảnh lên canvas ngay lập tức
         img = Image.open(file_path)
         img.thumbnail((500, 350))
-        img_ctk = ctk.CTkImage(light_image=img, dark_image=img, size=(img.width, img.height))
-        self.display_label.configure(image=img_ctk, text="")
-        self.display_label.image = img_ctk
+        photo = ImageTk.PhotoImage(img)
+        self.canvas.delete("all")
+        self._photo = photo
+        cw = self.canvas.winfo_width()
+        ch = self.canvas.winfo_height()
+        self._canvas_img = self.canvas.create_image(cw // 2, ch // 2,
+                                                     anchor="center", image=self._photo)
+        self.display_label.place_forget()
 
         self.res_label.configure(text="Đang xử lý ảnh...", text_color="#aaa", font=(FONT, 12))
         self.update()
