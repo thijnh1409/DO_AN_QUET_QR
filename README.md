@@ -16,8 +16,8 @@ Dự án là một **Desktop App** chạy trên hệ điều hành máy tính (s
   * **Giao diện (UI/UX):** Xây dựng màn hình chính, nút điều hướng, cửa sổ cảnh báo, v.v.
   * **Quét mã QR:** Tích hợp camera, xử lý quét thẳng và nghiêng nhẹ. *(Lưu ý: Quét góc nghiêng sâu là thử thách khó do giới hạn của Webcam, sẽ dùng làm phần nghiên cứu nâng cao).*
   * **Quản lý dữ liệu:** Ghi nhận và xuất lịch sử quét ra file văn bản.
-* 🌟 **GIAI ĐOẠN 2 (Tính năng mở rộng):**
-  * **Tạo mã QR:** Bổ sung tính năng cá nhân hóa mã QR (đổi màu, chèn ảnh, tùy chỉnh kích thước) khi thời gian cho phép.
+<!-- * 🌟 **GIAI ĐOẠN 2 (Tính năng mở rộng):**
+  * **Tạo mã QR:** Bổ sung tính năng cá nhân hóa mã QR (đổi màu, chèn ảnh, tùy chỉnh kích thước) khi thời gian cho phép. -->
 
 ---
 
