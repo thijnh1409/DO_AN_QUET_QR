@@ -20,13 +20,7 @@ def save_scan_log(content, qr_type, source="Camera"):
             lines = f.readlines()
             valid_lines = [line for line in lines if line.strip() != ""]
             if valid_lines:
-                try:
-                    last_line = valid_lines[-1]
-                    # Bổ sung maxsplit=4 để cắt an toàn
-                    last_stt = int(last_line.split("|", 4)[0].strip())
-                    stt = last_stt + 1
-                except ValueError:
-                    stt = len(valid_lines) + 1
+                stt = len(valid_lines) + 1
 
     # VÁ LỖI XUỐNG DÒNG: Thay thế \n bằng ký hiệu đặc biệt (vd: \u2028) hoặc <br>
     safe_content = str(content).replace("\r\n", "<br>").replace("\n", "<br>")

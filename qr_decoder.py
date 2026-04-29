@@ -122,7 +122,8 @@ class QRDecoder:
     # Data classification
     # ------------------------------------------------------------------
 
-    def _classify_data(self, content: str) -> str:
+    @staticmethod
+    def classify_data(content: str) -> str:
         upper = content.upper()
         if upper.startswith(("HTTP://", "HTTPS://", "WWW.")):
             return "Website"
@@ -142,7 +143,7 @@ class QRDecoder:
         if (now - self.scanned_history.get(qr_data, 0)) > self.COOLDOWN_TIME:
             # Prune history before inserting to cap memory usage
             if len(self.scanned_history) >= self.MAX_HISTORY_SIZE:
-                oldest_key = min(self.scanned_history, key=self.scanned_history.get)
+                oldest_key = next(iter(self.scanned_history))
                 del self.scanned_history[oldest_key]
             self.scanned_history[qr_data] = now
             return True
@@ -195,15 +196,15 @@ class QRDecoder:
             x1, y1, x2, y2 = map(int, detection["bbox_xyxy"])
             cv2.rectangle(frame_rgb, (x1, y1), (x2, y2), (0, 255, 0), 3)
 
-            label = qr_data if len(qr_data) < self.DISPLAY_MAX_LEN else qr_data[:self.DISPLAY_MAX_LEN] + "…"
-            cv2.putText(frame_rgb, label, (x1, y1 - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
+            # label = qr_data if len(qr_data) < self.DISPLAY_MAX_LEN else qr_data[:self.DISPLAY_MAX_LEN] + "…"
+            # cv2.putText(frame_rgb, label, (x1, y1 - 10),
+            #             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
 
             if self._check_cooldown(qr_data):
                 # Only the first code that passes cooldown is surfaced per frame.
                 # To surface all codes, change return type to List[ScanResult].
                 qr_data_result = qr_data
-                qr_type_result = self._classify_data(qr_data)
+                qr_type_result = self.classify_data(qr_data)
 
         return ScanResult(frame=frame_rgb, data=qr_data_result, data_type=qr_type_result)
 
@@ -259,3 +260,32 @@ class QRDecoder:
     def release_camera(self) -> None:
         """Giữ lại để không breaking change. Dùng shutdown() cho code mới."""
         self.shutdown()
+
+class FileQRDecoder:
+    """Khối xử lý chuyên dụng cho việc quét QR từ file ảnh (Không đụng tới Camera)."""
+    
+    # Dùng biến tĩnh (class variable) để chỉ tải AI QReader đúng 1 lần
+    _qreader = None 
+
+    @classmethod
+    def decode(cls, file_path: str) -> list[str]:
+        # 1. Tải AI lười biếng (chỉ tải khi thực sự có người quét file)
+        if cls._qreader is None:
+            print("Đang tải mô hình AI QReader cho File ảnh...")
+            from qreader import QReader
+            cls._qreader = QReader()
+
+        # 2. Xử lý ảnh bằng OpenCV (an toàn với đường dẫn tiếng Việt)
+        import cv2
+        import numpy as np
+        
+        img_cv2 = cv2.imdecode(np.fromfile(file_path, dtype=np.uint8), cv2.IMREAD_COLOR)
+        if img_cv2 is None:
+            raise ValueError("Không thể đọc file ảnh (đường dẫn lỗi hoặc định dạng sai)")
+
+        # 3. Chuyển hệ màu và chạy AI
+        img_rgb = cv2.cvtColor(img_cv2, cv2.COLOR_BGR2RGB)
+        results = cls._qreader.detect_and_decode(image=img_rgb)
+        
+        # 4. Trả về danh sách các mã quét được (loại bỏ giá trị None)
+        return [t for t in results if t is not None]

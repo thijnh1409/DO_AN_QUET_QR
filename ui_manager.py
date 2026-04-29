@@ -1,28 +1,15 @@
 import sys
 import os
 import threading
-
 import customtkinter as ctk
 import tkinter as tk
-
-# PIL: cần ngay khi app khởi động (logo, clear_display, fit_image_to_box)
 from PIL import Image, ImageOps, ImageTk
-
-# QRDecoder: class wrapper nhẹ, dùng ở cả camera lẫn quét file → import sẵn
-from qr_decoder import QRDecoder
-
-# data_manager: cần ngay khi ScanPage / HistoryPage load lịch sử lúc khởi động
+from qr_decoder import QRDecoder, FileQRDecoder
 from data_manager import (
     save_scan_log, load_scan_logs,
     delete_scan_log, clear_scan_logs,
     export_to_csv_logic,
 )
-
-# --- LAZY / LOCAL IMPORTS (chỉ tải khi thật sự dùng) ---
-# cv2, numpy  → chỉ dùng trong _decode_in_thread (quét file ảnh)
-# datetime    → chỉ dùng trong _apply_filter_sort (HistoryPage)
-# filedialog  → chỉ dùng khi mở hộp thoại chọn / lưu file
-# messagebox  → chỉ dùng khi xuất CSV
 
 # ─────────────────────────────────────────────────────────────
 # HẰNG SỐ TOÀN APP  –  chỉnh tại đây, có hiệu lực khắp nơi
@@ -56,11 +43,7 @@ def resource_path(relative_path: str) -> str:
 # HÀM TIỆN ÍCH DÙNG CHUNG
 # ─────────────────────────────────────────────────────────────
 
-def make_topbar(parent, title: str, subtitle: str) -> ctk.CTkFrame:
-    """
-    Tạo thanh tiêu đề trắng chuẩn dùng cho mọi trang.
-    Trả về frame topbar để caller có thể gắn thêm widget vào bên phải nếu cần.
-    """
+def make_topbar(parent, title: str, subtitle: str):
     topbar = ctk.CTkFrame(parent, height=75, fg_color="white", corner_radius=0)
     topbar.pack(fill="x", side="top")
 
@@ -68,9 +51,14 @@ def make_topbar(parent, title: str, subtitle: str) -> ctk.CTkFrame:
     title_container.pack(side="left", padx=25, pady=10)
     ctk.CTkLabel(title_container, text=title,
                  font=(FONT, 18, "bold"), text_color="#1a1a1a").pack(anchor="w")
-    ctk.CTkLabel(title_container, text=subtitle,
-                 font=(FONT, 12), text_color="#888").pack(anchor="w")
-    return topbar
+                 
+    # Gán vào biến sub_label thay vì pack trực tiếp
+    sub_label = ctk.CTkLabel(title_container, text=subtitle,
+                             font=(FONT, 12), text_color="#888")
+    sub_label.pack(anchor="w")
+    
+    # Trả về cả topbar lẫn sub_label
+    return topbar, sub_label
 
 
 def make_icon_button(parent, icon: str, command, hover_color: str = "#F0F0F0",
@@ -121,7 +109,7 @@ class HistoryItemWidget(ctk.CTkFrame):
                      corner_radius=6, width=58, height=20).pack(side="left", padx=(0, 10))
 
         # Nội dung – ScanPage cắt ngắn (truncate=True), HistoryPage hiện đầy đủ (truncate=False)
-        display = (content[:27] + "…" if len(content) > 30 else content) if truncate else content
+        display = (content[:23] + "…" if len(content) > 26 else content) if truncate else content
         ctk.CTkLabel(row, text=display, font=(FONT, 13, "bold"),
                      text_color="#1a1a1a", anchor="w").pack(side="left", fill="x", expand=True)
 
@@ -154,6 +142,8 @@ class QRCodeApp(ctk.CTk):
         self.geometry("1000x650")
         self.configure(fg_color=COLOR_BG)
 
+        self.protocol("WM_DELETE_WINDOW", self.on_closing)
+
         self.intro_frame    = ctk.CTkFrame(self, fg_color="transparent")
         self.main_app_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.frames:      dict = {}
@@ -163,6 +153,20 @@ class QRCodeApp(ctk.CTk):
         self._load_assets()
         self._setup_intro_screen()
         self.intro_frame.pack(fill="both", expand=True)
+
+    # ── Graceful Shutdown ───────────────────────────────────────────────
+
+    def on_closing(self):
+        """Dọn dẹp mọi luồng ngầm và camera trước khi đóng hẳn ứng dụng."""
+        print("Đang dọn dẹp hệ thống...")
+        
+        # Tìm ScanPage và yêu cầu tắt Camera an toàn
+        scan_page = self.frames.get("ScanPage")
+        if scan_page and getattr(scan_page, "decoder", None):
+            scan_page.decoder.shutdown()
+            
+        # Tắt hẳn cửa sổ
+        self.destroy()
 
     # ── Assets ───────────────────────────────────────────────
 
@@ -304,6 +308,7 @@ class ScanPage(ctk.CTkFrame):
         self.controller  = controller
         self.decoder     = None
         self.is_scanning = False
+        self._file_scanning = False
         self._recent_rows: list = []  # (content, time_str, widget) – dùng để xóa đồng bộ
 
         self._build_ui()
@@ -313,11 +318,7 @@ class ScanPage(ctk.CTkFrame):
 
     def _build_ui(self):
         # Topbar dùng hàm chung; giữ ref để gắn badge camera bên phải
-        topbar = make_topbar(self, "Quét mã QR", "Hướng camera vào mã cần quét")
-
-        # Lấy lại sub_label để đổi text khi chuyển chế độ
-        title_container = topbar.winfo_children()[0]
-        self.sub_label  = title_container.winfo_children()[1]
+        topbar, self.sub_label = make_topbar(self, "Quét mã QR", "Hướng camera vào mã cần quét")
 
         # Badge trạng thái camera
         self.cam_badge = ctk.CTkFrame(topbar, fg_color="#F5F5F5", corner_radius=20)
@@ -414,15 +415,23 @@ class ScanPage(ctk.CTkFrame):
         self.display_label.place(relx=0.5, rely=0.5, anchor="center")
 
     def _show_scan_result(self, content: str, qr_type: str):
-        """Hiển thị kết quả, lưu log, thêm dòng lịch sử. Dùng chung cho Camera và File."""
-        self.res_label.configure(text=str(content), text_color=COLOR_GREEN,
-                                 font=(FONT, 14, "bold"))
+        """Hiển thị kết quả, đẩy việc lưu file ra luồng nền để không nghẽn camera."""
+        # 1. Update kết quả lên màn hình ngay lập tức (siêu nhẹ, không lag)
+        self.res_label.configure(text=str(content), text_color=COLOR_GREEN, font=(FONT, 14, "bold"))
         self.controller.copy_to_clipboard(content, self.btn_copy)
-        try:
-            time_str = save_scan_log(str(content), str(qr_type), "Camera")
-            self.add_history_row(str(content), str(qr_type), time_str)
-        except Exception as e:
-            print("Lỗi lưu lịch sử:", e)
+
+        # 2. Đẩy tác vụ nặng (Lưu file text) ra một luồng riêng
+        def background_save():
+            try:
+                # Việc này tốn thời gian giao tiếp ổ cứng -> Chạy ngầm là đẹp nhất
+                time_str = save_scan_log(str(content), str(qr_type), "Camera")
+                
+                # Dùng self.after để quay lại cập nhật Lịch sử UI an toàn trên luồng chính
+                self.after(0, lambda: self.add_history_row(str(content), str(qr_type), time_str))
+            except Exception as e:
+                print("Lỗi lưu lịch sử:", e)
+                
+        threading.Thread(target=background_save, daemon=True).start()
 
     def copy_result(self):
         self.controller.copy_to_clipboard(self.res_label.cget("text"), self.btn_copy)
@@ -529,10 +538,10 @@ class ScanPage(ctk.CTkFrame):
     def open_file_dialog(self, event):
         if self.tabs.get() != "Từ file ảnh":
             return
-        if getattr(self, "_file_scanning", False):
+        if self._file_scanning:
             return
 
-        from tkinter import filedialog   # lazy: chỉ tải khi người dùng mở hộp thoại
+        from tkinter import filedialog
         file_path = filedialog.askopenfilename(
             title="Chọn ảnh QR",
             filetypes=[("Image Files", "*.png *.jpg *.jpeg *.bmp")],
@@ -540,88 +549,98 @@ class ScanPage(ctk.CTkFrame):
         if not file_path:
             return
 
-        # Hiển thị ảnh lên canvas ngay lập tức
+        # --- 1. HIỂN THỊ ẢNH LÊN GIAO DIỆN ---
         img = Image.open(file_path)
         img.thumbnail((500, 350))
         photo = ImageTk.PhotoImage(img)
         self.canvas.delete("all")
         self._photo = photo
-        cw = self.canvas.winfo_width()
-        ch = self.canvas.winfo_height()
-        self._canvas_img = self.canvas.create_image(cw // 2, ch // 2,
-                                                     anchor="center", image=self._photo)
+        cw, ch = self.canvas.winfo_width(), self.canvas.winfo_height()
+        self._canvas_img = self.canvas.create_image(cw // 2, ch // 2, anchor="center", image=self._photo)
         self.display_label.place_forget()
 
         self.res_label.configure(text="Đang xử lý ảnh...", text_color="#aaa", font=(FONT, 12))
         self.update()
         self._file_scanning = True
 
-        def _show_result(content: str, qr_type: str = "Từ file"):
+        # --- 2. CÁC HÀM CẬP NHẬT UI KHI CHẠY XONG ---
+        def _show_result(content: str, qr_type: str):
             self._file_scanning = False
-            self.res_label.configure(text=str(content), text_color=COLOR_GREEN,
-                                     font=(FONT, 14, "bold"))
+            self.res_label.configure(text=str(content), text_color=COLOR_GREEN, font=(FONT, 14, "bold"))
             self.controller.copy_to_clipboard(content, self.btn_copy)
-            try:
-                time_str = save_scan_log(str(content), qr_type, "File ảnh")
-                self.add_history_row(str(content), qr_type, time_str)
-            except Exception as e:
-                print("Lỗi lưu lịch sử file:", e)
+            
+            # Đẩy việc lưu file ra luồng nền (Tối ưu chống giật lag)
+            def background_save():
+                try:
+                    time_str = save_scan_log(str(content), qr_type, "File ảnh")
+                    self.after(0, lambda: self.add_history_row(str(content), qr_type, time_str))
+                except Exception as e:
+                    print("Lỗi lưu lịch sử file:", e)
+            threading.Thread(target=background_save, daemon=True).start()
 
         def _show_error(msg: str):
             self._file_scanning = False
             self.res_label.configure(text=msg, text_color=COLOR_RED, font=(FONT, 12))
 
-        def _decode_in_thread():
+        # --- 3. GIAO VIỆC CHO KHỐI XỬ LÝ (CHẠY NGẦM) ---
+        def _decode_in_thread(f_path):
             try:
-                if not hasattr(self, "file_qreader"):
-                    from qreader import QReader
-                    print("Đang tải mô hình AI cho File ảnh...")
-                    self.file_qreader = QReader()
-
-                import cv2                          # lazy: chỉ tải khi quét file ảnh
-                import numpy as np                  # lazy: chỉ tải khi quét file ảnh
-                img_cv2 = cv2.imdecode(np.fromfile(file_path, dtype=np.uint8), cv2.IMREAD_COLOR)
-                if img_cv2 is None:
-                    raise ValueError("Không thể đọc file ảnh (đường dẫn lỗi hoặc định dạng sai)")
-
-                img_rgb = cv2.cvtColor(img_cv2, cv2.COLOR_BGR2RGB)
-                valid   = [t for t in self.file_qreader.detect_and_decode(image=img_rgb)
-                           if t is not None]
-                if valid:
-                    self.after(0, lambda: _show_result(valid[0]))
+                # UI chỉ việc gọi hàm decode, không cần biết bên trong AI chạy thế nào!
+                valid_results = FileQRDecoder.decode(f_path)
+                
+                if valid_results:
+                    qr_content = valid_results[0]
+                    # Tái sử dụng hàm tĩnh phân loại
+                    qr_type = QRDecoder.classify_data(qr_content)
+                    
+                    self.after(0, lambda: _show_result(qr_content, qr_type))
                 else:
                     self.after(0, lambda: _show_error("Không tìm thấy mã QR nào"))
             except Exception as e:
                 print(f"Lỗi giải mã file: {e}")
                 self.after(0, lambda: _show_error("Lỗi đọc file ảnh!"))
 
-        threading.Thread(target=_decode_in_thread, daemon=True).start()
+        threading.Thread(target=_decode_in_thread, args=(file_path,), daemon=True).start()
 
     # ── Lịch sử gần đây ──────────────────────────────────────
 
     def load_recent_history(self):
         """Tải 10 lịch sử mới nhất khi khởi động."""
         try:
-            for log in load_scan_logs()[::-1][:self.MAX_RECENT]:
+            # Lấy 10 dòng mới nhất, giữ nguyên thứ tự cũ -> mới.
+            # Khi pack liên tục lên đầu, phần tử mới nhất sẽ trồi lên trên cùng.
+            recent_logs = load_scan_logs()[-self.MAX_RECENT:]
+            for log in recent_logs:
                 self.add_history_row(log["content"], log["type"], log["time"])
         except Exception as e:
             print(f"Lỗi tải lịch sử gần đây: {e}")
 
     def add_history_row(self, content: str, qr_type: str, time_str: str):
         """Thêm dòng lịch sử lên đầu danh sách, giữ tối đa MAX_RECENT dòng."""
-        children = self.hist_list.winfo_children()
-        if len(children) >= self.MAX_RECENT:
-            children[-1].destroy()
+        # 1. Nếu vượt quá 10 dòng, xóa dòng CŨ NHẤT (dòng nằm ở đầu mảng quản lý)
+        if len(self._recent_rows) >= self.MAX_RECENT:
+            oldest_entry = self._recent_rows.pop(0)  # Lấy và xóa khỏi mảng
+            oldest_entry[2].destroy()                # Xóa widget khỏi màn hình
 
+        # 2. Tạo widget mới
         widget = HistoryItemWidget(
             self.hist_list, content, qr_type, time_str,
             copy_func=self.controller.copy_to_clipboard,
         )
-        # Lưu để delete_history_row có thể tìm đúng dòng cần xóa
+        
+        # 3. Đưa widget mới lên ĐẦU giao diện
+        if self._recent_rows:
+            # Lấy widget đang nằm trên cùng hiện tại (phần tử cuối của mảng)
+            top_widget = self._recent_rows[-1][2]
+            widget.pack(fill="x", pady=(0, 4), before=top_widget)
+        else:
+            # Nếu chưa có dòng nào thì cứ pack bình thường
+            widget.pack(fill="x", pady=(0, 4))
+            
+        # 4. Lưu vào danh sách quản lý
         self._recent_rows.append((content, time_str, widget))
-        widget.pack(fill="x", pady=(0, 4),
-                    before=children[0] if children else None)
-        # Bắn tín hiệu sang trang Toàn bộ Lịch sử
+        
+        # 5. Bắn tín hiệu sang trang Toàn bộ Lịch sử
         hist_page = self.controller.frames.get("HistoryPage") 
         if hist_page and hasattr(hist_page, 'add_new_row_to_top'):
             hist_page.add_new_row_to_top(content, qr_type, time_str)
@@ -699,16 +718,6 @@ class HistoryPage(ctk.CTkFrame):
         self.filter_combo.set("Tất cả")
         self.filter_combo.pack(side="left", padx=(0, 6))
 
-        # ── Tìm kiếm ──────────────────────────────────────────
-        self.search_var = ctk.StringVar()
-        self.search_var.trace_add("write", lambda *_: self._apply_filter_sort())
-        self.search_entry = ctk.CTkEntry(
-            toolbar, textvariable=self.search_var,
-            placeholder_text="🔍 Tìm kiếm nội dung...",
-            width=220, height=40, font=(FONT, 13),
-            fg_color="white", border_width=1, border_color="#E0DED8", corner_radius=8)
-        self.search_entry.pack(side="left")
-
         # ── Nút bên phải ──────────────────────────────────────
         ctk.CTkButton(toolbar, text="🗑 Xóa tất cả", font=(FONT, 13, "bold"),
                       width=110, height=40, fg_color="#FDE8E8",
@@ -726,17 +735,21 @@ class HistoryPage(ctk.CTkFrame):
 
     def _load_history(self):
         """Tải toàn bộ lịch sử từ file khi khởi động."""
-        self._all_rows: list[dict] = []
         try:
-            for log in load_scan_logs()[::-1]:
-                self._all_rows.append({
+            # Rút gọn bằng List Comprehension:
+            self._all_rows = [
+                {
                     "content":  log["content"],
                     "qr_type":  log["type"],
                     "source":   log.get("source", ""),
                     "time_str": log["time"],
-                })
+                }
+                for log in load_scan_logs()[::-1]
+            ]
         except Exception as e:
             print(f"Lỗi tải lịch sử: {e}")
+            self._all_rows = [] # Nếu lỗi thì trả về mảng rỗng
+            
         self._apply_filter_sort()
 
     def add_history_row(self, content: str, qr_type: str, source: str, time_str: str):
@@ -750,8 +763,40 @@ class HistoryPage(ctk.CTkFrame):
         self._apply_filter_sort()
 
     def add_new_row_to_top(self, content: str, qr_type: str, time_str: str):
-        """Nhận lệnh từ ScanPage để thêm dòng mới (source mặc định là Camera)."""
-        self.add_history_row(content, qr_type, "Camera", time_str)
+        """Nhận lệnh từ ScanPage để thêm dòng mới (Tối ưu hóa: Không render lại toàn bộ)."""
+        # 1. Chỉ cập nhật dữ liệu gốc, KHÔNG gọi _apply_filter_sort() để tránh giật lag
+        self._all_rows.insert(0, {
+            "content":  content,
+            "qr_type":  qr_type,
+            "source":   "Camera",
+            "time_str": time_str,
+        })
+
+        # 2. Xử lý UI siêu nhẹ: Chỉ chèn 1 widget lên trên cùng
+        selected_type = self.filter_combo.get()
+        keyword = getattr(self, "search_var", ctk.StringVar()).get().strip().lower()
+        
+        # Đảm bảo chỉ vẽ thêm nếu dòng này khớp với bộ lọc hiện tại của người dùng
+        if (selected_type == "Tất cả" or qr_type == selected_type) and \
+           (not keyword or keyword in content.lower()) and \
+           (not self._sort_asc):
+            
+            label  = f"Camera  •  {time_str}"
+            widget = HistoryItemWidget(
+                self.scroll_list, content, qr_type, label,
+                copy_func=self.controller.copy_to_clipboard,
+                delete_func=lambda w, c=content, t=time_str: self.delete_row(w, c, t),
+                truncate=False,
+            )
+            
+            # Chèn widget mới lên trên cùng của danh sách
+            if self.history_widgets:
+                top_widget = self.history_widgets[0][2]
+                widget.pack(fill="x", pady=(0, 4), before=top_widget)
+            else:
+                widget.pack(fill="x", pady=(0, 4))
+                
+            self.history_widgets.insert(0, (content, time_str, widget))
 
     # ── Filter / Sort ─────────────────────────────────────────
 
