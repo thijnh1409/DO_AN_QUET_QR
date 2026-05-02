@@ -66,7 +66,7 @@ class QRDecoder:
         self._camera_index = camera_index   # lưu lại để resume() dùng
         self.cap = cv2.VideoCapture(camera_index)
         if not self.cap.isOpened():
-            print("⚠️  CẢNH BÁO: Không tìm thấy Camera! Vui lòng kiểm tra lại thiết bị.")
+            print("CẢNH BÁO: Không tìm thấy Camera! Vui lòng kiểm tra lại thiết bị.")
 
         self.scanned_history: dict[str, float] = {}
 
@@ -93,7 +93,7 @@ class QRDecoder:
         return self
 
     def __exit__(self, *_) -> None:
-        self.release_camera()
+        self.shutdown()
 
     # ------------------------------------------------------------------
     # Background AI worker (runs in its own thread)
@@ -153,10 +153,10 @@ class QRDecoder:
     # Public API
     # ------------------------------------------------------------------
 
-    @property
-    def is_camera_ok(self) -> bool:
-        """True while the camera is open and readable."""
-        return self.cap.isOpened()
+    # @property
+    # def is_camera_ok(self) -> bool:
+    #     """True while the camera is open and readable."""
+    #     return self.cap.isOpened()
 
     def get_frame_and_data(self) -> ScanResult:
         """
@@ -257,9 +257,9 @@ class QRDecoder:
         if self.cap.isOpened():
             self.cap.release()
 
-    def release_camera(self) -> None:
-        """Giữ lại để không breaking change. Dùng shutdown() cho code mới."""
-        self.shutdown()
+    # def release_camera(self) -> None:
+    #     """Giữ lại để không breaking change. Dùng shutdown() cho code mới."""
+    #     self.shutdown()
 
 class FileQRDecoder:
     """Khối xử lý chuyên dụng cho việc quét QR từ file ảnh (Không đụng tới Camera)."""
@@ -269,23 +269,17 @@ class FileQRDecoder:
 
     @classmethod
     def decode(cls, file_path: str) -> list[str]:
-        # 1. Tải AI lười biếng (chỉ tải khi thực sự có người quét file)
         if cls._qreader is None:
             print("Đang tải mô hình AI QReader cho File ảnh...")
-            from qreader import QReader
             cls._qreader = QReader()
 
-        # 2. Xử lý ảnh bằng OpenCV (an toàn với đường dẫn tiếng Việt)
-        import cv2
         import numpy as np
         
         img_cv2 = cv2.imdecode(np.fromfile(file_path, dtype=np.uint8), cv2.IMREAD_COLOR)
         if img_cv2 is None:
             raise ValueError("Không thể đọc file ảnh (đường dẫn lỗi hoặc định dạng sai)")
 
-        # 3. Chuyển hệ màu và chạy AI
         img_rgb = cv2.cvtColor(img_cv2, cv2.COLOR_BGR2RGB)
         results = cls._qreader.detect_and_decode(image=img_rgb)
         
-        # 4. Trả về danh sách các mã quét được (loại bỏ giá trị None)
-        return [t for t in results if t is not None]
+        return [qr_text for qr_text in results if qr_text is not None]

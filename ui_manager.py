@@ -201,7 +201,7 @@ class QRCodeApp(ctk.CTk):
                                 border_width=1, border_color="#E0DED8")
         info_box.pack(pady=10, padx=50)
 
-        ctk.CTkLabel(info_box, text="Giảng viên hướng dẫn: Ts. Dương Minh Thiện",
+        ctk.CTkLabel(info_box, text="Giảng viên hướng dẫn: TS. Dương Minh Thiện",
                      font=(FONT, 16, "bold"), text_color=COLOR_GREEN).pack(pady=(20, 15), padx=60)
 
         members = [
@@ -463,7 +463,7 @@ class ScanPage(ctk.CTkFrame):
         else:
             self.is_scanning = False
             if getattr(self, "decoder", None):
-                # DÙNG HÀM PAUSE thay vì release_camera()
+                
                 self.decoder.pause()
                 
             self.btn_toggle.configure(text="Bật Camera", fg_color=COLOR_GREEN)
