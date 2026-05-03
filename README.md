@@ -27,8 +27,9 @@ QR_Scanner_Project/
 ├── data_manager.py     # Xử lý hậu cần, ghi/đọc tệp lịch sử và xuất CSV
 ├── requirements.txt    # Danh sách các thư viện cần thiết
 └── scan_logs.txt       # Tệp cơ sở dữ liệu cục bộ lưu lịch sử quét
+```
 
-## 4. Hướng dẫn & Lưu ý quan trọng
+## Hướng dẫn & Lưu ý quan trọng
 * **Chuẩn Code [PEP-8](https://codelearn.io/sharing/pep8-chuan-ket-noi-python-phan-1):** Khuyến khích anh em code tuân thủ chuẩn **PEP-8** của Python (dùng `snake_case` cho tên biến/hàm, comment rõ chức năng, cách dòng chuẩn chỉ). Điều này giúp code sạch, dễ đọc và dễ gộp (merge) mà không bị conflict.
 * **Trích dẫn mã nguồn (Quan trọng):** Nếu anh em tham khảo hoặc tái sử dụng thuật toán phức tạp từ GitHub hay các nguồn bên ngoài (như xử lý góc nghiêng, chèn ảnh...), phải comment link nguồn gốc ngay trên đoạn code đó (VD: `# Nguồn tham khảo logic: [Link]`).
 * **Thư viện yêu cầu:** Cài đặt toàn bộ thư viện bằng cách mở Terminal tại thư mục code và gõ lệnh: `pip install -r requirements.txt`.
