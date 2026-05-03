@@ -31,7 +31,9 @@ QR_TYPE_DEFAULT = ("#FEF0DB", "#E67C22", "📄")
 
 
 def resource_path(relative_path: str) -> str:
-    """Lấy đường dẫn tuyệt đối tới tài nguyên, dùng cho cả Dev và PyInstaller."""
+    """
+    Trả về đường dẫn tuyệt đối đến tài nguyên, hỗ trợ cả khi chạy dưới dạng script lẫn PyInstaller.
+    """
     try:
         base_path = sys._MEIPASS
     except AttributeError:
@@ -44,6 +46,14 @@ def resource_path(relative_path: str) -> str:
 # ─────────────────────────────────────────────────────────────
 
 def make_topbar(parent, title: str, subtitle: str):
+    """
+    Tạo một topbar tiêu chuẩn với tiêu đề chính và phụ.
+    - Trả về cả topbar lẫn sub_label để có thể cập nhật text sau này (ví dụ: trạng thái camera).
+    - Sử dụng make_topbar(parent, title, subtitle) để tạo topbar cho cả ScanPage và HistoryPage, 
+    đảm bảo sự nhất quán về thiết kế. Bạn có thể cập nhật text của sub_label sau khi tạo để hiển 
+    thị thông tin trạng thái hoặc hướng dẫn cụ thể cho từng trang.
+
+    """
     topbar = ctk.CTkFrame(parent, height=75, fg_color="white", corner_radius=0)
     topbar.pack(fill="x", side="top")
 
@@ -63,7 +73,9 @@ def make_topbar(parent, title: str, subtitle: str):
 
 def make_icon_button(parent, icon: str, command, hover_color: str = "#F0F0F0",
                      text_color: str = "#aaa", size: int = 32) -> ctk.CTkButton:
-    """Tạo nút icon trong suốt chuẩn (dùng cho copy, xóa…)."""
+    """
+    Tạo một nút icon trong suốt chuẩn (dùng cho copy, xóa…).
+    """
     return ctk.CTkButton(
         parent, text=icon, font=("Arial", 13),
         width=size, height=size,
@@ -73,10 +85,10 @@ def make_icon_button(parent, icon: str, command, hover_color: str = "#F0F0F0",
     )
 
 
-def fit_image_to_box(pil_img: Image.Image, box_w: int, box_h: int) -> ctk.CTkImage:
-    """Thu/phóng ảnh PIL lấp đầy khung (box_w x box_h), trả về CTkImage."""
-    fitted = ImageOps.fit(pil_img, (box_w, box_h), Image.Resampling.LANCZOS)
-    return ctk.CTkImage(light_image=fitted, dark_image=fitted, size=(box_w, box_h))
+# def fit_image_to_box(pil_img: Image.Image, box_w: int, box_h: int) -> ctk.CTkImage:
+#     """Thu/phóng ảnh PIL lấp đầy khung (box_w x box_h), trả về CTkImage."""
+#     fitted = ImageOps.fit(pil_img, (box_w, box_h), Image.Resampling.LANCZOS)
+#     return ctk.CTkImage(light_image=fitted, dark_image=fitted, size=(box_w, box_h))
 
 
 # ─────────────────────────────────────────────────────────────
@@ -85,8 +97,9 @@ def fit_image_to_box(pil_img: Image.Image, box_w: int, box_h: int) -> ctk.CTkIma
 
 class HistoryItemWidget(ctk.CTkFrame):
     """
-    Khuôn đúc 1 dòng lịch sử.
-    Tái sử dụng cho cả ScanPage (không có nút xóa) và HistoryPage (có nút xóa).
+    Khuôn đúc Component UI: Đại diện cho một dòng hiển thị lịch sử quét.
+    - Tái sử dụng: dùng chung cho cả ScanPage (phiên bản rút gọn) và HistoryPage (phiên bản đầy đủ có nút xóa).
+    - Tự động thay đổi màu nền, font chữ và Icon hiển thị dựa vào loại mã (qr_type) được nạp từ từ điển QR_TYPE_STYLES.
     """
     def __init__(self, parent, content: str, qr_type: str, time_str: str,
                  copy_func, delete_func=None, truncate: bool = True):
@@ -136,6 +149,14 @@ ctk.set_appearance_mode("light")
 
 
 class QRCodeApp(ctk.CTk):
+    """
+    Lớp chính của ứng dụng, quản lý toàn bộ giao diện và điều hướng giữa các trang.
+        - Chịu trách nhiệm tạo cửa sổ, sidebar, topbar và quản lý các trang con (ScanPage, HistoryPage).
+        - Cung cấp phương thức copy_to_clipboard() dùng chung cho cả app để sao chép nội dung và hiển thị hiệu ứng.
+        - Đảm bảo rằng khi người dùng đóng ứng dụng, tất cả tài nguyên (đặc biệt là camera và luồng AI) 
+        được giải phóng đúng cách thông qua phương thức on_closing().
+    """
+
     def __init__(self):
         super().__init__()
         self.title("AI QR Scanner - Nhóm 8")
@@ -157,7 +178,11 @@ class QRCodeApp(ctk.CTk):
     # ── Graceful Shutdown ───────────────────────────────────────────────
 
     def on_closing(self):
-        """Dọn dẹp mọi luồng ngầm và camera trước khi đóng hẳn ứng dụng."""
+        """
+        Đóng ứng dụng một cách an toàn, đảm bảo rằng tất cả tài nguyên (đặc biệt là camera và luồng AI) được giải phóng đúng cách để tránh lỗi hoặc treo máy.
+            - Gọi shutdown() của QRDecoder để dừng luồng AI và giải phóng camera.
+            - Sau đó mới gọi self.destroy() để đóng cửa sổ ứng dụng.
+        """
         print("Đang dọn dẹp hệ thống...")
         
         # Tìm ScanPage và yêu cầu tắt Camera an toàn
@@ -171,6 +196,13 @@ class QRCodeApp(ctk.CTk):
     # ── Assets ───────────────────────────────────────────────
 
     def _load_assets(self):
+        """
+        Tải trước tất cả hình ảnh (logo) vào bộ nhớ RAM ngay khi ứng dụng vừa mở lên.
+        - Tối ưu: Chỉ đọc file ảnh từ ổ cứng đúng 1 lần. Chỗ nào cần thì gọi ra dùng chung để phần mềm khởi động nhanh hơn.
+        - Chống lỗi: Kết hợp xử lý đường dẫn an toàn để đảm bảo lúc xuất thành file .exe đem qua máy khác, 
+        phần mềm vẫn tìm thấy ảnh logo mà không bị lỗi văng app.
+        """
+
         logo_path = resource_path(os.path.join("assets", "hcmute-logo.png"))
         if not os.path.exists(logo_path):
             print(f"Không tìm thấy logo tại {logo_path}")
@@ -187,6 +219,10 @@ class QRCodeApp(ctk.CTk):
     # ── Màn hình Intro ───────────────────────────────────────
 
     def _setup_intro_screen(self):
+        """
+        Xây dựng giao diện màn hình giới thiệu với logo, tiêu đề, thông tin nhóm và nút bắt đầu.
+        """
+
         content = ctk.CTkFrame(self.intro_frame, fg_color="transparent")
         content.pack(expand=True)
 
@@ -226,13 +262,27 @@ class QRCodeApp(ctk.CTk):
                       command=self._enter_main_app).pack(pady=30)
 
     def _enter_main_app(self):
+        """
+        Chuyển đổi từ màn hình giới thiệu sang giao diện chính của ứng dụng.
+        """
+
         self.intro_frame.pack_forget()
         self.main_app_frame.pack(fill="both", expand=True)
         self._setup_main_app()
 
-    # ── Layout chính ─────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# LAYOUT CHÍNH: Sidebar + Main Content (ScanPage, HistoryPage)
+# ---------------------------------------------------------------------------
 
     def _setup_main_app(self):
+        """
+        Xây dựng giao diện chính với sidebar điều hướng và khu vực hiển thị nội dung tương ứng.
+            - Sidebar: Chứa logo nhỏ và các nút điều hướng giữa ScanPage và HistoryPage. 
+            Nút nào đang hoạt động sẽ có màu nền khác biệt.
+            - Main Content: Khu vực này sẽ chứa các trang con (ScanPage, HistoryPage) 
+            được xếp chồng lên nhau, chỉ hiển thị trang đang được chọn.
+        """
+
         sidebar = ctk.CTkFrame(self.main_app_frame, width=80,
                                fg_color=COLOR_DARK, corner_radius=0)
         sidebar.pack(side="left", fill="y")
@@ -258,7 +308,14 @@ class QRCodeApp(ctk.CTk):
         self.show_page("ScanPage", "scan_page")
 
     def _create_nav_button(self, sidebar, page_id: str, text: str, is_active: bool = False):
-        """Tạo nút điều hướng sidebar."""
+        """
+        Hàm hỗ trợ tạo nhanh các nút bấm bên thanh menu dọc (Sidebar).
+        - Tránh lặp code: Chỉ cần gọi hàm này là tự động có ngay một nút bấm bo góc, 
+        đổi màu khi chuột lướt qua đúng chuẩn thiết kế chung.
+        - Trực quan: Nút nào đang được chọn (is_active=True) thì sẽ sáng màu xanh lên, 
+        các nút khác sẽ chìm màu xám xuống.
+        """
+
         btn = ctk.CTkButton(
             sidebar, text=text, font=(FONT, 12, "bold"),
             fg_color=COLOR_GREEN_DARK if is_active else "transparent",
@@ -272,6 +329,12 @@ class QRCodeApp(ctk.CTk):
         self.nav_buttons[page_id] = btn
 
     def show_page(self, frame_class_name: str, page_id: str):
+        """
+        Hiển thị trang tương ứng và cập nhật trạng thái nút điều hướng.
+        - frame_class_name: Tên lớp của trang cần hiển thị (ví dụ: "ScanPage", "HistoryPage").
+        - page_id: ID của nút điều hướng tương ứng để cập nhật trạng thái (ví dụ: "scan_page", "history_page").
+        """
+
         for pid, btn in self.nav_buttons.items():
             active = pid == page_id
             btn.configure(
@@ -280,10 +343,11 @@ class QRCodeApp(ctk.CTk):
             )
         self.frames[frame_class_name].tkraise()
 
-    # ── Clipboard (dùng chung toàn app) ──────────────────────
+# ---------------------------------------------------------------------------
+# CLIPBOARD: Hàm tiện ích dùng chung
+# ---------------------------------------------------------------------------
 
     def copy_to_clipboard(self, content: str, button=None):
-        """Copy nội dung vào bộ nhớ đệm và hiển thị hiệu ứng ✅ trên nút."""
         if not content or content in ("Chưa có dữ liệu", "Đang xử lý ảnh..."):
             return
         self.clipboard_clear()
@@ -296,11 +360,17 @@ class QRCodeApp(ctk.CTk):
             self.after(1000, lambda: button.configure(text=old_text, text_color=old_color))
 
 
-# ─────────────────────────────────────────────────────────────
-# TRANG: QUÉT MÃ QR
-# ─────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# TRANG QUÉT MÃ QR: ScanPage
+# ---------------------------------------------------------------------------
 
 class ScanPage(ctk.CTkFrame):
+    """
+    Trang chính để quét mã QR từ camera hoặc file ảnh.
+    - Tích hợp QRDecoder để xử lý luồng camera và AI.
+    - Cập nhật kết quả quét và lịch sử gần đây ngay lập tức sau mỗi lần quét thành công.
+    """
+
     MAX_RECENT = 10   # số dòng tối đa ở khung "Lịch sử gần đây"
 
     def __init__(self, parent, controller: QRCodeApp):
@@ -415,7 +485,13 @@ class ScanPage(ctk.CTkFrame):
         self.display_label.place(relx=0.5, rely=0.5, anchor="center")
 
     def _show_scan_result(self, content: str, qr_type: str):
-        """Hiển thị kết quả, đẩy việc lưu file ra luồng nền để không nghẽn camera."""
+        """
+        Xử lý hiển thị kết quả và lưu trữ ngầm.
+            - Non-blocking UI: Cập nhật chữ lên màn hình ngay lập tức, đồng thời đẩy tác vụ nặng (ghi file lên ổ cứng) 
+            ra một luồng nền (Background Thread) để vòng lặp Camera không bị khựng (giật lag).
+            - Thread-safe UI: Sau khi luồng nền lưu file xong, sử dụng lệnh self.after(0, ...) để "nhờ" 
+            luồng UI chính vẽ thêm dòng lịch sử mới (Tránh lỗi văng app do luồng phụ tự ý can thiệp UI).
+        """
         # 1. Update kết quả lên màn hình ngay lập tức (siêu nhẹ, không lag)
         self.res_label.configure(text=str(content), text_color=COLOR_GREEN, font=(FONT, 14, "bold"))
         self.controller.copy_to_clipboard(content, self.btn_copy)
@@ -439,6 +515,13 @@ class ScanPage(ctk.CTkFrame):
     # ── Camera ───────────────────────────────────────────────
 
     def toggle_camera(self):
+        """
+        Bật hoặc tắt camera một cách an toàn.
+        - Khi tắt: Chỉ tạm dừng kết nối camera (pause), nhưng vẫn "giữ" mô hình AI trong RAM để lần sau người dùng 
+        bấm bật lại thì lên hình luôn, không phải chờ tải lại AI.
+        - Cập nhật đúng các nút bấm, màu sắc và chữ trên màn hình để báo cho người dùng biết camera đang bật hay tắt.
+        """
+
         if not self.is_scanning:
             try:
                 # KIỂM TRA: Nếu chưa có decoder thì tạo mới, nếu có rồi thì resume
@@ -473,6 +556,14 @@ class ScanPage(ctk.CTkFrame):
             self.clear_display("Nhấn 'Bật Camera' để bắt đầu")
 
     def run_camera_loop(self):
+        """
+        Vòng lặp liên tục lấy ảnh từ camera đưa lên màn hình.
+        - Tiết kiệm RAM: Ghi đè màu mới lên bức ảnh có sẵn trên Canvas thay vì liên tục tạo ra đối tượng ảnh mới, 
+        giúp máy không bị đầy bộ nhớ khi bật camera lâu.
+        - Chống quá tải CPU: Dùng self.after(15) để vòng lặp nghỉ khoảng 15 mili-giây giữa các lần quét, 
+        giữ cho ứng dụng chạy êm mà không gây hại đến máy tính.
+        """
+
         if not self.is_scanning or self.decoder is None:
             return
         try:
@@ -536,6 +627,13 @@ class ScanPage(ctk.CTkFrame):
             self.cam_badge.pack(side="right", padx=25)
 
     def open_file_dialog(self, event):
+        """
+        Mở hộp thoại chọn ảnh và xử lý giải mã.
+        - Tránh lỗi: Có biến cờ (flag) chặn lại, không cho người dùng bấm mở nhiều hộp thoại cùng lúc nếu ảnh trước đó chưa xử lý xong.
+        - Chống đơ app: Việc nhờ AI đọc ảnh tốn thời gian, nên nhóm đẩy việc này ra một luồng ngầm (chạy phía sau). 
+        Nhờ vậy giao diện vẫn mượt mà và hiện được chữ "Đang xử lý...".
+        """
+
         if self.tabs.get() != "Từ file ảnh":
             return
         if self._file_scanning:
