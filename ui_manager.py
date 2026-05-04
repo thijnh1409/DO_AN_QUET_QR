@@ -683,7 +683,6 @@ class ScanPage(ctk.CTkFrame):
         # --- 3. GIAO VIỆC CHO KHỐI XỬ LÝ (CHẠY NGẦM) ---
         def _decode_in_thread(f_path):
             try:
-                # UI chỉ việc gọi hàm decode, không cần biết bên trong AI chạy thế nào!
                 valid_results = FileQRDecoder.decode(f_path)
                 
                 if valid_results:
@@ -971,7 +970,7 @@ class HistoryPage(ctk.CTkFrame):
 
         # Xóa nguồn dữ liệu gốc
         self._all_rows.clear()
-        self._apply_filter_sort()   # re-render → danh sách trống
+        self._apply_filter_sort()
 
         # Đồng bộ xóa ở ScanPage
         scan_page = self.controller.frames.get("ScanPage")
@@ -982,7 +981,7 @@ class HistoryPage(ctk.CTkFrame):
 
     def _export_csv(self):
         """Nhiệm vụ: Tương tác với người dùng (Hộp thoại chọn file, Thông báo)"""
-        from tkinter import filedialog, messagebox   # lazy: chỉ tải khi xuất CSV
+        from tkinter import filedialog, messagebox  
 
         # 1. Lấy dữ liệu
         logs = load_scan_logs()
