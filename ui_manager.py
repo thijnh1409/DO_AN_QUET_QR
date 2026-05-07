@@ -310,8 +310,7 @@ class QRCodeApp(ctk.CTk):
     def _create_nav_button(self, sidebar, page_id: str, text: str, is_active: bool = False):
         """
         Hàm hỗ trợ tạo nhanh các nút bấm bên thanh menu dọc (Sidebar).
-        - Tránh lặp code: Chỉ cần gọi hàm này là tự động có ngay một nút bấm bo góc, 
-        đổi màu khi chuột lướt qua đúng chuẩn thiết kế chung.
+        - Tránh lặp code: Chỉ cần gọi hàm này là tự động có ngay một nút bấm bo góc.
         - Trực quan: Nút nào đang được chọn (is_active=True) thì sẽ sáng màu xanh lên, 
         các nút khác sẽ chìm màu xám xuống.
         """
@@ -489,21 +488,21 @@ class ScanPage(ctk.CTkFrame):
         Xử lý hiển thị kết quả và lưu trữ ngầm.
             - Non-blocking UI: Cập nhật chữ lên màn hình ngay lập tức, đồng thời đẩy tác vụ nặng (ghi file lên ổ cứng) 
             ra một luồng nền (Background Thread) để vòng lặp Camera không bị khựng (giật lag).
-            - Thread-safe UI: Sau khi luồng nền lưu file xong, sử dụng lệnh self.after(0, ...) để "nhờ" 
+            - Thread-safe UI: Sau khi luồng nền lưu file xong, sử dụng lệnh self.after(0, ...) để nhờ 
             luồng UI chính vẽ thêm dòng lịch sử mới (Tránh lỗi văng app do luồng phụ tự ý can thiệp UI).
         """
-        # 1. Update kết quả lên màn hình ngay lập tức (siêu nhẹ, không lag)
+        # 1. Update kết quả lên màn hình ngay lập tức
         self.res_label.configure(text=str(content), text_color=COLOR_GREEN, font=(FONT, 14, "bold"))
-        self.controller.copy_to_clipboard(content, self.btn_copy)
+        # self.controller.copy_to_clipboard(content, self.btn_copy) # Tính năng tự động copy khi quét thành công.
 
-        # 2. Đẩy tác vụ nặng (Lưu file text) ra một luồng riêng
+        # 2. Đẩy Lưu file text ra một luồng riêng
         def background_save():
             try:
                 # Việc này tốn thời gian giao tiếp ổ cứng -> Chạy ngầm là đẹp nhất
                 time_str = save_scan_log(str(content), str(qr_type), "Camera")
                 
                 # Dùng self.after để quay lại cập nhật Lịch sử UI an toàn trên luồng chính
-                self.after(0, lambda: self.add_history_row(str(content), str(qr_type), time_str))
+                self.after(0, lambda: self.add_history_row(str(content), str(qr_type), "Camera", time_str))
             except Exception as e:
                 print("Lỗi lưu lịch sử:", e)
                 
@@ -588,7 +587,6 @@ class ScanPage(ctk.CTkFrame):
                                                                 image=self._photo)
                     self.display_label.place_forget()   # ẩn chữ khi có camera
                 else:
-                    # Cập nhật pixel IN-PLACE — không cấp phát RAM mới
                     self._photo.paste(img)
 
             # Hiển thị kết quả nếu quét trúng
@@ -665,13 +663,13 @@ class ScanPage(ctk.CTkFrame):
         def _show_result(content: str, qr_type: str):
             self._file_scanning = False
             self.res_label.configure(text=str(content), text_color=COLOR_GREEN, font=(FONT, 14, "bold"))
-            self.controller.copy_to_clipboard(content, self.btn_copy)
+            # self.controller.copy_to_clipboard(content, self.btn_copy) # Tính năng tự động copy khi quét thành công.
             
-            # Đẩy việc lưu file ra luồng nền (Tối ưu chống giật lag)
+            # Đẩy việc lưu file ra luồng nền để tránh lag giao diện
             def background_save():
                 try:
                     time_str = save_scan_log(str(content), qr_type, "File ảnh")
-                    self.after(0, lambda: self.add_history_row(str(content), qr_type, time_str))
+                    self.after(0, lambda: self.add_history_row(str(content), qr_type, "File ảnh",time_str))
                 except Exception as e:
                     print("Lỗi lưu lịch sử file:", e)
             threading.Thread(target=background_save, daemon=True).start()
@@ -708,11 +706,11 @@ class ScanPage(ctk.CTkFrame):
             # Khi pack liên tục lên đầu, phần tử mới nhất sẽ trồi lên trên cùng.
             recent_logs = load_scan_logs()[-self.MAX_RECENT:]
             for log in recent_logs:
-                self.add_history_row(log["content"], log["type"], log["time"])
+                self.add_history_row(log["content"], log["type"], log.get("source", "Camera"), log["time"])
         except Exception as e:
             print(f"Lỗi tải lịch sử gần đây: {e}")
 
-    def add_history_row(self, content: str, qr_type: str, time_str: str):
+    def add_history_row(self, content: str, qr_type: str, source: str, time_str: str):
         """Thêm dòng lịch sử lên đầu danh sách, giữ tối đa MAX_RECENT dòng."""
         # 1. Nếu vượt quá 10 dòng, xóa dòng CŨ NHẤT (dòng nằm ở đầu mảng quản lý)
         if len(self._recent_rows) >= self.MAX_RECENT:
@@ -740,7 +738,7 @@ class ScanPage(ctk.CTkFrame):
         # 5. Bắn tín hiệu sang trang Toàn bộ Lịch sử
         hist_page = self.controller.frames.get("HistoryPage") 
         if hist_page and hasattr(hist_page, 'add_new_row_to_top'):
-            hist_page.add_new_row_to_top(content, qr_type, time_str)
+            hist_page.add_new_row_to_top(content, qr_type, source, time_str)
 
     def delete_history_row(self, content: str, time_str: str):
         """
@@ -849,27 +847,17 @@ class HistoryPage(ctk.CTkFrame):
             
         self._apply_filter_sort()
 
-    def add_history_row(self, content: str, qr_type: str, source: str, time_str: str):
-        """Thêm 1 bản ghi vào nguồn dữ liệu rồi re-render."""
+    def add_new_row_to_top(self, content: str, qr_type: str, source: str, time_str: str):
+        """Nhận lệnh từ ScanPage để thêm dòng mới."""
+        # 1. cập nhật dữ liệu gốc
         self._all_rows.insert(0, {
             "content":  content,
             "qr_type":  qr_type,
             "source":   source,
             "time_str": time_str,
         })
-        self._apply_filter_sort()
 
-    def add_new_row_to_top(self, content: str, qr_type: str, time_str: str):
-        """Nhận lệnh từ ScanPage để thêm dòng mới (Tối ưu hóa: Không render lại toàn bộ)."""
-        # 1. Chỉ cập nhật dữ liệu gốc, KHÔNG gọi _apply_filter_sort() để tránh giật lag
-        self._all_rows.insert(0, {
-            "content":  content,
-            "qr_type":  qr_type,
-            "source":   "Camera",
-            "time_str": time_str,
-        })
-
-        # 2. Xử lý UI siêu nhẹ: Chỉ chèn 1 widget lên trên cùng
+        # 2. Chỉ chèn 1 widget lên trên cùng
         selected_type = self.filter_combo.get()
         keyword = getattr(self, "search_var", ctk.StringVar()).get().strip().lower()
         
@@ -878,7 +866,7 @@ class HistoryPage(ctk.CTkFrame):
            (not keyword or keyword in content.lower()) and \
            (not self._sort_asc):
             
-            label  = f"Camera  •  {time_str}"
+            label  = f"{source}  •  {time_str}"
             widget = HistoryItemWidget(
                 self.scroll_list, content, qr_type, label,
                 copy_func=self.controller.copy_to_clipboard,
@@ -927,7 +915,7 @@ class HistoryPage(ctk.CTkFrame):
         # 3. Sắp xếp (dùng time_str làm key – định dạng HH:MM - DD/MM/YYYY)
         def parse_time(r):
             try:
-                from datetime import datetime   # lazy: chỉ tải khi sort lịch sử
+                from datetime import datetime
                 return datetime.strptime(r["time_str"], "%H:%M - %d/%m/%Y")
             except Exception:
                 return r["time_str"]
@@ -947,7 +935,7 @@ class HistoryPage(ctk.CTkFrame):
             self.history_widgets.append((r["content"], r["time_str"], widget))
 
     def delete_row(self, widget: HistoryItemWidget, content: str, time_str: str):
-        """Xóa dòng khỏi HistoryPage VÀ đồng bộ xóa dòng tương ứng ở ScanPage."""
+        """Xóa dòng khỏi HistoryPage và đồng bộ xóa dòng tương ứng ở ScanPage."""
         # 1. Xóa khỏi file
         delete_scan_log(content, time_str)
 
@@ -980,7 +968,9 @@ class HistoryPage(ctk.CTkFrame):
             scan_page._recent_rows.clear()
 
     def _export_csv(self):
-        """Nhiệm vụ: Tương tác với người dùng (Hộp thoại chọn file, Thông báo)"""
+        """
+        Xuất toàn bộ lịch sử ra file CSV.
+        """
         from tkinter import filedialog, messagebox  
 
         # 1. Lấy dữ liệu
