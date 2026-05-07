@@ -3,8 +3,3 @@ Pillow
 opencv-python
 numpy
 qreader
-# qrcode
-# pyzbar
-#Mở rộng (nếu cần sẽ báo sau)
-# pywifi
-# comtypes

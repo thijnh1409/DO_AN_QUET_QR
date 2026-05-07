@@ -12,7 +12,7 @@ from data_manager import (
 )
 
 # ─────────────────────────────────────────────────────────────
-# HẰNG SỐ TOÀN APP  –  chỉnh tại đây, có hiệu lực khắp nơi
+# HẰNG SỐ TOÀN APP 
 # ─────────────────────────────────────────────────────────────
 FONT             = "Space Grotesk"
 COLOR_BG         = "#F7F6F2"
@@ -62,12 +62,10 @@ def make_topbar(parent, title: str, subtitle: str):
     ctk.CTkLabel(title_container, text=title,
                  font=(FONT, 18, "bold"), text_color="#1a1a1a").pack(anchor="w")
                  
-    # Gán vào biến sub_label thay vì pack trực tiếp
     sub_label = ctk.CTkLabel(title_container, text=subtitle,
                              font=(FONT, 12), text_color="#888")
     sub_label.pack(anchor="w")
     
-    # Trả về cả topbar lẫn sub_label
     return topbar, sub_label
 
 
@@ -83,12 +81,6 @@ def make_icon_button(parent, icon: str, command, hover_color: str = "#F0F0F0",
         hover_color=hover_color, corner_radius=8,
         command=command,
     )
-
-
-# def fit_image_to_box(pil_img: Image.Image, box_w: int, box_h: int) -> ctk.CTkImage:
-#     """Thu/phóng ảnh PIL lấp đầy khung (box_w x box_h), trả về CTkImage."""
-#     fitted = ImageOps.fit(pil_img, (box_w, box_h), Image.Resampling.LANCZOS)
-#     return ctk.CTkImage(light_image=fitted, dark_image=fitted, size=(box_w, box_h))
 
 
 # ─────────────────────────────────────────────────────────────
@@ -175,7 +167,7 @@ class QRCodeApp(ctk.CTk):
         self._setup_intro_screen()
         self.intro_frame.pack(fill="both", expand=True)
 
-    # ── Graceful Shutdown ───────────────────────────────────────────────
+    # ── Đóng ứng dụng ───────────────────────────────────────────────
 
     def on_closing(self):
         """
@@ -193,7 +185,7 @@ class QRCodeApp(ctk.CTk):
         # Tắt hẳn cửa sổ
         self.destroy()
 
-    # ── Assets ───────────────────────────────────────────────
+    # ── Tải tài nguyên ───────────────────────────────────────────────
 
     def _load_assets(self):
         """
@@ -333,6 +325,10 @@ class QRCodeApp(ctk.CTk):
         - frame_class_name: Tên lớp của trang cần hiển thị (ví dụ: "ScanPage", "HistoryPage").
         - page_id: ID của nút điều hướng tương ứng để cập nhật trạng thái (ví dụ: "scan_page", "history_page").
         """
+        if frame_class_name != "ScanPage": #Tự động tắt camera nếu đang ở ScanPage mà chuyển sang trang khác
+            scan_page: ScanPage = self.frames.get("ScanPage")
+            if scan_page and scan_page.is_scanning:
+                scan_page.toggle_camera()
 
         for pid, btn in self.nav_buttons.items():
             active = pid == page_id
@@ -585,7 +581,7 @@ class ScanPage(ctk.CTkFrame):
                     self.canvas.delete("all")
                     self._canvas_img = self.canvas.create_image(0, 0, anchor="nw",
                                                                 image=self._photo)
-                    self.display_label.place_forget()   # ẩn chữ khi có camera
+                    self.display_label.place_forget()
                 else:
                     self._photo.paste(img)
 
@@ -990,7 +986,7 @@ class HistoryPage(ctk.CTkFrame):
         if not file_path:
             return
 
-        # 3. Ra lệnh cho data_manager ghi file (Logic)
+        # 3. Ra lệnh cho data_manager ghi file
         try:
             export_to_csv_logic(file_path, logs)
             messagebox.showinfo("Thành công", f"Đã xuất {len(logs)} dòng ra file CSV!")
